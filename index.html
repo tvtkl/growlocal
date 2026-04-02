@@ -1,0 +1,1855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GrowLocal — Field Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Canela+Deck:wght@300;400&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://ajax.googleapis.com/ajax/libs/cesiumjs/1.105/Build/Cesium/Cesium.js"></script>
+<link href="https://ajax.googleapis.com/ajax/libs/cesiumjs/1.105/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════
+   TOKENS
+═══════════════════════════════════════════ */
+:root {
+  --paper:     #F5F2EA;
+  --paper2:    #EDE9DF;
+  --paper3:    #E4DFCF;
+  --ink:       #1C2218;
+  --ink2:      #2E3829;
+  --ink3:      #404D38;
+  --sage:      #7A9E6A;
+  --sage-dim:  #4E6B40;
+  --sage-pale: #C8D9BE;
+  --leaf:      #4A7C3F;
+  --leaf-hi:   #5E9E52;
+  --sprout:    #A8CC8C;
+  --sprout-hi: #C4E0AC;
+  --amber:     #C27B2A;
+  --amber-pale:#E8C98A;
+  --soil:      #7A5C3A;
+  --soil-pale: #C4A882;
+  --mist:      rgba(122,158,106,0.12);
+  --mist2:     rgba(122,158,106,0.06);
+  --border:    rgba(74,124,63,0.18);
+  --border-hi: rgba(74,124,63,0.38);
+  --shadow:    rgba(28,34,24,0.15);
+
+  --font-display: 'Syne', sans-serif;
+  --font-body:    'DM Mono', monospace;
+  --r:  8px;
+  --rl: 14px;
+  --rxl: 999px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+/* Subtle paper grain */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 1;
+}
+
+/* ═══════════════════════════════════════════
+   SHELL — like WorldView's 3-column layout
+═══════════════════════════════════════════ */
+.shell {
+  display: grid;
+  grid-template-columns: 300px 1fr 280px;
+  grid-template-rows: 56px 1fr 48px;
+  height: 100vh;
+  gap: 0;
+}
+
+/* ═══════════════════════════════════════════
+   TOP BAR
+═══════════════════════════════════════════ */
+.topbar {
+  grid-column: 1 / -1;
+  background: var(--ink);
+  display: flex;
+  align-items: center;
+  padding: 0 1.5rem;
+  gap: 2rem;
+  position: relative;
+  overflow: hidden;
+}
+.topbar::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--leaf-hi), var(--sprout), var(--leaf-hi), transparent);
+}
+
+.brand {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--sprout-hi);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.brand-icon {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, var(--sprout) 0%, var(--leaf) 60%, var(--sage-dim) 100%);
+  position: relative;
+  animation: globe-breathe 4s ease-in-out infinite;
+}
+@keyframes globe-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(94,158,82,0); }
+  50% { box-shadow: 0 0 0 5px rgba(94,158,82,0.2); }
+}
+
+.topbar-meta {
+  font-size: 0.62rem;
+  color: var(--sage);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.topbar-meta span { color: var(--sprout); margin-left: 0.5rem; }
+
+.step-trail {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin: 0 auto;
+}
+.snode {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(122,158,106,0.3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 500;
+  color: rgba(122,158,106,0.5);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--font-body);
+}
+.snode.done { border-color: var(--sage-dim); color: var(--sage); background: rgba(74,124,63,0.1); }
+.snode.active { border-color: var(--sprout); color: var(--ink); background: var(--sprout); }
+.sconnect { width: 20px; height: 1px; background: rgba(122,158,106,0.2); }
+.sconnect.done { background: var(--sage-dim); }
+
+.api-zone {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+.api-lbl { font-size: 0.58rem; color: rgba(122,158,106,0.6); text-transform: uppercase; letter-spacing: 0.08em; }
+.api-inp {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(122,158,106,0.2);
+  border-radius: 4px;
+  padding: 0.28rem 0.6rem;
+  font-family: var(--font-body);
+  font-size: 0.65rem;
+  color: var(--sage);
+  width: 160px;
+  outline: none;
+}
+.api-inp::placeholder { color: rgba(122,158,106,0.25); }
+.api-inp:focus { border-color: rgba(122,158,106,0.5); }
+
+/* ═══════════════════════════════════════════
+   LEFT PANEL — steps / data layers
+═══════════════════════════════════════════ */
+.left-panel {
+  background: var(--paper2);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.left-panel::-webkit-scrollbar { width: 2px; }
+.left-panel::-webkit-scrollbar-thumb { background: var(--sage-pale); }
+
+/* ═══════════════════════════════════════════
+   CENTER — circular scoped map (WorldView hero)
+═══════════════════════════════════════════ */
+.map-zone {
+  background: var(--paper3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Crosshatch background */
+.map-zone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 40px 40px;
+  opacity: 0.5;
+}
+
+/* THE CIRCULAR SCOPE — WorldView's signature element */
+.scope-wrap {
+  position: relative;
+  width: min(70vh, 65vw);
+  height: min(70vh, 65vw);
+  flex-shrink: 0;
+}
+
+.scope-ring-outer {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  border: 1px solid var(--border-hi);
+  background: transparent;
+  pointer-events: none;
+  z-index: 20;
+}
+.scope-ring-outer::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 1px dashed rgba(74,124,63,0.2);
+}
+
+/* Tick marks around the circle */
+.scope-ticks {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  z-index: 21;
+  pointer-events: none;
+}
+.scope-ticks::before, .scope-ticks::after {
+  content: '';
+  position: absolute;
+}
+
+/* Corner crosshair brackets */
+.scope-brackets {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  z-index: 22;
+  pointer-events: none;
+}
+.scope-bracket {
+  position: absolute;
+  width: 20px; height: 20px;
+  border-color: var(--leaf);
+  border-style: solid;
+}
+.scope-bracket.tl { top: 14%; left: 14%; border-width: 2px 0 0 2px; border-radius: 3px 0 0 0; }
+.scope-bracket.tr { top: 14%; right: 14%; border-width: 2px 2px 0 0; border-radius: 0 3px 0 0; }
+.scope-bracket.bl { bottom: 14%; left: 14%; border-width: 0 0 2px 2px; border-radius: 0 0 0 3px; }
+.scope-bracket.br { bottom: 14%; right: 14%; border-width: 0 2px 2px 0; border-radius: 0 0 3px 0; }
+
+/* Scope crosshair lines */
+.scope-crosshair {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  z-index: 23;
+  pointer-events: none;
+  overflow: hidden;
+}
+.scope-crosshair::before {
+  content: '';
+  position: absolute;
+  top: 50%; left: 10%;
+  width: 80%; height: 1px;
+  background: rgba(74,124,63,0.15);
+  transform: translateY(-50%);
+}
+.scope-crosshair::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 10%;
+  height: 80%; width: 1px;
+  background: rgba(74,124,63,0.15);
+  transform: translateX(-50%);
+}
+
+/* The actual circular viewport for Cesium */
+.scope-viewport {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+  box-shadow:
+    0 0 0 1px var(--border-hi),
+    0 0 60px rgba(74,124,63,0.12),
+    inset 0 0 80px rgba(28,34,24,0.3);
+}
+
+/* Inner vignette on map */
+.scope-vignette {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(28,34,24,0.45) 100%);
+  pointer-events: none;
+  z-index: 15;
+}
+
+#cesiumContainer {
+  width: 100%; height: 100%;
+}
+.cesium-widget-credits,
+.cesium-credit-logoContainer { display: none !important; }
+
+/* Empty state */
+.scope-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #D4E8C8 0%, #C8D9BE 40%, #B8C8A8 100%);
+  transition: opacity 0.5s;
+  z-index: 10;
+}
+.scope-empty.gone { opacity: 0; pointer-events: none; }
+
+.scope-empty-icon {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 38%, var(--sprout-hi) 0%, var(--leaf) 55%, var(--sage-dim) 100%);
+  box-shadow: 0 8px 32px rgba(74,124,63,0.4);
+  position: relative;
+  animation: float 3s ease-in-out infinite;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+/* Little continent shapes */
+.scope-empty-icon::before {
+  content: '';
+  position: absolute;
+  top: 22%; left: 28%;
+  width: 30%; height: 22%;
+  background: rgba(255,255,255,0.25);
+  border-radius: 40% 60% 60% 40%;
+  transform: rotate(-15deg);
+}
+.scope-empty-icon::after {
+  content: '';
+  position: absolute;
+  bottom: 25%; right: 20%;
+  width: 24%; height: 18%;
+  background: rgba(255,255,255,0.2);
+  border-radius: 50% 30% 40% 60%;
+  transform: rotate(10deg);
+}
+
+.scope-empty p {
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  color: var(--sage-dim);
+  text-align: center;
+  line-height: 1.7;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* HUD overlays around the circle */
+.hud-top {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.hud-bottom {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.hud-chip {
+  background: rgba(245,242,234,0.88);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-hi);
+  border-radius: 4px;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.6rem;
+  color: var(--sage-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.hud-chip .val { color: var(--leaf); font-weight: 500; }
+.hud-chip .dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--leaf-hi);
+  animation: blink 2s ease-in-out infinite;
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* Quick location chips below map (like WorldView's city buttons) */
+.location-pills {
+  position: absolute;
+  bottom: -42px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.4rem;
+  z-index: 30;
+  flex-wrap: nowrap;
+}
+
+/* Status readout top-right of scope */
+.scope-readout {
+  position: absolute;
+  top: 16px; right: -80px;
+  z-index: 30;
+  font-size: 0.58rem;
+  color: var(--sage-dim);
+  line-height: 1.6;
+  text-align: right;
+  letter-spacing: 0.05em;
+}
+.scope-readout .bright { color: var(--leaf); }
+
+/* ═══════════════════════════════════════════
+   RIGHT PANEL — seasonal / plant data
+═══════════════════════════════════════════ */
+.right-panel {
+  background: var(--paper2);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.right-panel::-webkit-scrollbar { width: 2px; }
+.right-panel::-webkit-scrollbar-thumb { background: var(--sage-pale); }
+
+/* ═══════════════════════════════════════════
+   BOTTOM BAR
+═══════════════════════════════════════════ */
+.bottombar {
+  grid-column: 1 / -1;
+  background: var(--ink);
+  border-top: 1px solid rgba(74,124,63,0.2);
+  display: flex;
+  align-items: center;
+  padding: 0 1.5rem;
+  gap: 2rem;
+  overflow: hidden;
+  position: relative;
+}
+.bottombar::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--sage-dim), var(--leaf-hi), var(--sage-dim), transparent);
+}
+.bticker {
+  font-size: 0.58rem;
+  color: var(--sage);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.bticker span { color: var(--sprout); }
+.bticker-scroll {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+.bticker-text {
+  font-size: 0.58rem;
+  color: rgba(122,158,106,0.5);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  animation: ticker 40s linear infinite;
+}
+@keyframes ticker {
+  from { transform: translateX(100%); }
+  to { transform: translateX(-100%); }
+}
+
+/* ═══════════════════════════════════════════
+   PANEL SECTION HEADERS (WorldView "DATA LAYERS" style)
+═══════════════════════════════════════════ */
+.panel-section {
+  border-bottom: 1px solid var(--border);
+}
+.panel-header {
+  padding: 0.65rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--paper3);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.panel-header-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sage-dim);
+  font-family: var(--font-body);
+}
+.panel-header-action {
+  width: 20px; height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border-hi);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem;
+  color: var(--sage-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  background: transparent;
+}
+.panel-header-action:hover { background: var(--mist); border-color: var(--sage); color: var(--leaf); }
+
+/* ═══════════════════════════════════════════
+   STEP CONTENT
+═══════════════════════════════════════════ */
+.step-content { display: none; }
+.step-content.active { display: block; }
+
+.step-heading {
+  padding: 1rem 1rem 0.6rem;
+}
+.step-num-label {
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sage-dim);
+  margin-bottom: 0.3rem;
+}
+.step-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.step-title em { color: var(--leaf); font-style: normal; }
+.step-sub {
+  font-size: 0.65rem;
+  color: var(--sage-dim);
+  margin-top: 0.3rem;
+  line-height: 1.55;
+}
+
+/* ═══════════════════════════════════════════
+   FORM ELEMENTS
+═══════════════════════════════════════════ */
+.form-block { padding: 0 1rem 0.75rem; }
+
+.field-label {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sage-dim);
+  margin-bottom: 0.4rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.field-label .val { color: var(--leaf); font-weight: 400; }
+
+.text-input {
+  width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  padding: 0.65rem 0.85rem;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.18s;
+}
+.text-input::placeholder { color: rgba(74,124,63,0.3); }
+.text-input:focus { border-color: var(--sage); }
+
+.num-input {
+  width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  padding: 0.6rem 0.85rem;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--leaf);
+  outline: none;
+  -moz-appearance: textfield;
+  transition: border-color 0.18s;
+}
+.num-input:focus { border-color: var(--sage); }
+.num-input::-webkit-inner-spin-button,
+.num-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+.select-input {
+  width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  padding: 0.6rem 0.85rem;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  color: var(--ink);
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%234A7C3F' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.8rem center;
+  transition: border-color 0.18s;
+}
+.select-input:focus { border-color: var(--sage); }
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 2px;
+  background: var(--border-hi);
+  border-radius: 2px;
+  outline: none;
+  margin-top: 0.5rem;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--leaf);
+  cursor: pointer;
+  border: 2px solid var(--paper);
+  box-shadow: 0 0 0 1px var(--border-hi);
+  transition: transform 0.12s;
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+/* ═══════════════════════════════════════════
+   CHIP SELECTORS
+═══════════════════════════════════════════ */
+.chip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.35rem; }
+.chip-2 { grid-template-columns: repeat(2, 1fr); }
+
+.chip {
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  padding: 0.55rem 0.4rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--paper);
+}
+.chip:hover { border-color: var(--sage); background: var(--mist2); }
+.chip.on { border-color: var(--leaf); background: rgba(74,124,63,0.1); }
+
+.chip-icon { font-size: 1rem; margin-bottom: 0.2rem; }
+.chip-label { font-size: 0.62rem; font-weight: 600; color: var(--sage-dim); line-height: 1.3; }
+.chip.on .chip-label { color: var(--leaf); }
+
+/* Sun chips */
+.sun-chip { border-radius: var(--r); border: 1px solid var(--border-hi); padding: 0.65rem 0.4rem; text-align: center; cursor: pointer; transition: all 0.15s; background: var(--paper); }
+.sun-chip:hover { border-color: var(--amber); background: rgba(194,123,42,0.05); }
+.sun-chip.on { border-color: var(--amber); background: rgba(194,123,42,0.08); }
+.sun-chip .si { font-size: 1.1rem; }
+.sun-chip .sl { font-size: 0.62rem; font-weight: 600; color: var(--sage-dim); margin-top: 0.2rem; }
+.sun-chip .ss { font-size: 0.56rem; color: rgba(90,104,84,0.6); }
+.sun-chip.on .sl { color: var(--amber); }
+
+/* ═══════════════════════════════════════════
+   PEOPLE COUNTER
+═══════════════════════════════════════════ */
+.counter-row { display: flex; align-items: center; gap: 1rem; padding: 0.4rem 0 0.75rem; }
+.ctr-btn {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-hi);
+  background: var(--paper);
+  color: var(--leaf);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.ctr-btn:hover { background: var(--mist); border-color: var(--sage); }
+.ctr-num {
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: var(--leaf);
+  min-width: 2.5rem;
+  text-align: center;
+  line-height: 1;
+}
+.ctr-unit { font-size: 0.68rem; color: var(--sage-dim); }
+
+/* ═══════════════════════════════════════════
+   CLIMATE REVEAL
+═══════════════════════════════════════════ */
+.climate-card {
+  display: none;
+  margin: 0 1rem 0.75rem;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--rl);
+  overflow: hidden;
+  animation: fadeUp 0.3s ease;
+}
+.climate-card.show { display: block; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cc-header {
+  background: linear-gradient(135deg, var(--leaf) 0%, var(--sage-dim) 100%);
+  padding: 0.85rem 1rem;
+}
+.cc-zone-label { font-size: 0.56rem; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.65); }
+.cc-zone-name { font-family: var(--font-display); font-size: 1.05rem; font-weight: 700; color: #fff; margin-top: 0.15rem; }
+.cc-zone-desc { font-size: 0.62rem; color: rgba(255,255,255,0.78); margin-top: 0.25rem; line-height: 1.5; }
+.cc-stats { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--ink2); }
+.cc-stat { padding: 0.65rem 0.6rem; border-right: 1px solid rgba(255,255,255,0.06); text-align: center; }
+.cc-stat:last-child { border-right: none; }
+.cc-val { font-size: 0.75rem; color: var(--sprout-hi); font-family: var(--font-body); }
+.cc-lbl { font-size: 0.54rem; color: rgba(200,217,190,0.5); margin-top: 0.1rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* ═══════════════════════════════════════════
+   SPACE VISUALIZER
+═══════════════════════════════════════════ */
+.space-preview {
+  background: var(--paper);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 1rem 0.75rem;
+}
+.sp-box {
+  background: rgba(74,124,63,0.08);
+  border: 1.5px dashed var(--sage);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  position: relative;
+}
+.sp-box::before, .sp-box::after {
+  content: '';
+  position: absolute;
+  background: var(--sage);
+  opacity: 0.4;
+}
+.sp-box::before { top: -1px; left: 10%; width: 80%; height: 1px; }
+.sp-box::after { left: -1px; top: 10%; height: 80%; width: 1px; }
+.sp-label { font-size: 0.65rem; color: var(--sage-dim); font-family: var(--font-body); }
+.sp-stats { display: flex; gap: 1.25rem; text-align: center; }
+.sp-stat-v { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; color: var(--leaf); }
+.sp-stat-l { font-size: 0.56rem; color: var(--sage-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.05rem; }
+
+/* ═══════════════════════════════════════════
+   BUTTONS
+═══════════════════════════════════════════ */
+.btn-primary {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--leaf);
+  color: #fff;
+  border: none;
+  border-radius: var(--r);
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.btn-primary:hover { background: var(--leaf-hi); transform: translateY(-1px); }
+.btn-primary:disabled { background: var(--border-hi); color: var(--sage-dim); cursor: not-allowed; transform: none; }
+
+.btn-ghost {
+  padding: 0.65rem 1rem;
+  background: transparent;
+  color: var(--sage-dim);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r);
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-ghost:hover { border-color: var(--sage); color: var(--leaf); }
+
+.nav-row { display: flex; gap: 0.5rem; padding: 0.75rem 1rem 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem; }
+
+/* ═══════════════════════════════════════════
+   RESULTS — LEFT PANEL
+═══════════════════════════════════════════ */
+.res-summary {
+  padding: 1rem;
+  background: linear-gradient(135deg, rgba(74,124,63,0.1) 0%, rgba(122,158,106,0.05) 100%);
+  border-bottom: 1px solid var(--border);
+}
+.res-loc { font-size: 0.58rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--sage-dim); }
+.res-title { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; color: var(--ink); margin-top: 0.15rem; }
+.res-stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.4rem; margin-top: 0.75rem; }
+.rst { background: var(--paper); border: 1px solid var(--border-hi); border-radius: var(--r); padding: 0.5rem 0.6rem; text-align: center; }
+.rst-v { font-family: var(--font-display); font-size: 1.15rem; font-weight: 700; color: var(--leaf); }
+.rst-l { font-size: 0.54rem; color: var(--sage-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.ai-strip {
+  display: none;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid var(--leaf);
+  background: rgba(74,124,63,0.04);
+  font-size: 0.68rem;
+  color: var(--sage-dim);
+  line-height: 1.65;
+  font-style: italic;
+}
+.ai-strip.show { display: block; animation: fadeUp 0.4s ease; }
+
+/* ═══════════════════════════════════════════
+   PLANT ROWS (WorldView "data layer" style)
+═══════════════════════════════════════════ */
+.plant-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.plant-row:hover { background: var(--mist2); }
+.plant-row:last-child { border-bottom: none; }
+
+.pr-icon { font-size: 1.3rem; flex-shrink: 0; }
+.pr-info { flex: 1; min-width: 0; }
+.pr-name { font-size: 0.75rem; font-weight: 600; color: var(--ink); font-family: var(--font-display); }
+.pr-latin { font-size: 0.58rem; color: var(--sage-dim); font-style: italic; margin-top: 0.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-tags { display: flex; gap: 0.25rem; margin-top: 0.25rem; flex-wrap: wrap; }
+.pr-tag { font-size: 0.52rem; padding: 0.1rem 0.35rem; border-radius: 3px; font-family: var(--font-body); }
+.tag-green { background: rgba(74,124,63,0.1); color: var(--sage-dim); border: 1px solid rgba(74,124,63,0.2); }
+.tag-amber { background: rgba(194,123,42,0.1); color: var(--amber); border: 1px solid rgba(194,123,42,0.2); }
+
+.pr-right { text-align: right; flex-shrink: 0; }
+.pr-days { font-size: 0.62rem; color: var(--sage-dim); font-family: var(--font-body); }
+.pr-yield { font-size: 0.6rem; color: var(--leaf); margin-top: 0.1rem; }
+
+.pr-toggle {
+  width: 32px; height: 18px;
+  border-radius: 9px;
+  background: rgba(74,124,63,0.2);
+  border: 1px solid rgba(74,124,63,0.3);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.pr-toggle.on { background: var(--leaf); }
+.pr-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+.pr-toggle.on::after { transform: translateX(14px); }
+
+/* ═══════════════════════════════════════════
+   RIGHT PANEL — seasonal + tabs
+═══════════════════════════════════════════ */
+.rtabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+  position: sticky;
+  top: 0;
+  background: var(--paper3);
+  z-index: 5;
+}
+.rtab {
+  flex: 1;
+  padding: 0.55rem 0.4rem;
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--sage-dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  text-align: center;
+  transition: all 0.15s;
+  font-family: var(--font-body);
+}
+.rtab:hover { color: var(--leaf); }
+.rtab.on { color: var(--leaf); border-bottom-color: var(--leaf); }
+.rtab.now::after { content: '●'; font-size: 0.3rem; vertical-align: super; margin-left: 0.1rem; color: var(--leaf); }
+
+.rtp { display: none; }
+.rtp.on { display: block; animation: fadeUp 0.2s ease; }
+
+/* Frost strip */
+.frost-strip { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+.frost-card { background: var(--paper); border: 1px solid var(--border-hi); border-radius: var(--r); padding: 0.55rem 0.65rem; }
+.frost-icon { font-size: 0.9rem; }
+.frost-lbl { font-size: 0.54rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--sage-dim); margin-top: 0.15rem; }
+.frost-val { font-size: 0.72rem; font-weight: 600; color: var(--ink); margin-top: 0.05rem; font-family: var(--font-display); }
+
+/* Season tabs */
+.season-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.stab {
+  flex: 1;
+  padding: 0.5rem 0.3rem;
+  font-size: 0.56rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--sage-dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  text-align: center;
+  transition: all 0.15s;
+  background: none;
+  border-top: none; border-left: none; border-right: none;
+  font-family: var(--font-body);
+}
+.stab:hover { color: var(--leaf); }
+.stab.on { color: var(--leaf); border-bottom-color: var(--leaf); }
+.stab.now::after { content: ' ◉'; font-size: 0.35rem; vertical-align: super; color: var(--leaf); }
+
+.season-body { padding: 0.75rem 1rem; }
+.scol-title { font-size: 0.56rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--sage-dim); margin-bottom: 0.5rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--border); }
+.spr { display: flex; align-items: flex-start; gap: 0.4rem; padding: 0.32rem 0; border-bottom: 1px solid rgba(74,124,63,0.06); }
+.spr:last-child { border-bottom: none; }
+.spr-i { font-size: 0.85rem; flex-shrink: 0; margin-top: 0.05rem; }
+.spr-n { font-size: 0.68rem; font-weight: 600; color: var(--ink); }
+.spr-d { font-size: 0.58rem; color: var(--sage-dim); margin-top: 0.05rem; }
+.season-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.season-tasks { list-style: none; margin-top: 0.75rem; }
+.season-tasks li { font-size: 0.62rem; color: var(--sage-dim); padding: 0.28rem 0; border-bottom: 1px solid rgba(74,124,63,0.06); display: flex; gap: 0.35rem; line-height: 1.45; }
+.season-tasks li::before { content: '→'; color: var(--sage); flex-shrink: 0; }
+.season-tasks li:last-child { border-bottom: none; }
+.season-alert { margin-top: 0.65rem; padding: 0.5rem 0.7rem; background: rgba(194,123,42,0.08); border-left: 2px solid var(--amber); border-radius: 0 5px 5px 0; font-size: 0.62rem; color: var(--amber); line-height: 1.5; display: none; }
+.season-alert.show { display: block; }
+
+/* Month pills */
+.month-pills { padding: 0.65rem 1rem; display: flex; flex-wrap: wrap; gap: 0.28rem; border-bottom: 1px solid var(--border); }
+.mpill { padding: 0.22rem 0.5rem; border-radius: 20px; font-size: 0.58rem; border: 1px solid var(--border-hi); color: var(--sage-dim); cursor: pointer; transition: all 0.14s; background: var(--paper); font-family: var(--font-body); }
+.mpill:hover { border-color: var(--sage); color: var(--leaf); }
+.mpill.on { background: var(--leaf); border-color: var(--leaf); color: #fff; }
+.mpill.today { border-color: var(--sage); color: var(--leaf); }
+.month-detail { padding: 0.65rem 1rem; }
+.month-detail-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+.mdc h4 { font-size: 0.56rem; font-family: var(--font-body); color: var(--sage-dim); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 0.4rem; }
+.maction { display: flex; align-items: flex-start; gap: 0.35rem; padding: 0.28rem 0; border-bottom: 1px solid rgba(74,124,63,0.06); font-size: 0.62rem; color: var(--sage-dim); line-height: 1.4; }
+.maction:last-child { border-bottom: none; }
+.urg { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; margin-top: 0.28rem; }
+.uh { background: #E05A3A; }
+.um { background: var(--amber); }
+.ul { background: var(--sage); }
+
+/* Tips */
+.tips-list { list-style: none; padding: 0.65rem 1rem; }
+.tips-list li { padding: 0.45rem 0; border-bottom: 1px solid var(--border); font-size: 0.65rem; color: var(--sage-dim); line-height: 1.55; display: flex; gap: 0.4rem; }
+.tips-list li:last-child { border-bottom: none; }
+
+/* Calendar */
+.cal-wrap { padding: 0.65rem 1rem; overflow-x: auto; }
+.cgrid { display: grid; grid-template-columns: 90px repeat(12,1fr); gap: 2px; min-width: 380px; }
+.cmh { text-align: center; font-size: 0.52rem; color: var(--sage-dim); padding: 0.2rem 0; text-transform: uppercase; }
+.cnc { font-size: 0.58rem; color: var(--sage-dim); display: flex; align-items: center; gap: 0.2rem; padding: 0.18rem 0; overflow: hidden; }
+.cc { height: 18px; border-radius: 2px; }
+.cs { background: var(--leaf); opacity: 0.85; }
+.cg { background: var(--sage-dim); opacity: 0.65; }
+.ch { background: var(--amber); opacity: 0.8; }
+.ce { background: var(--paper3); }
+.cleg { display: flex; gap: 0.75rem; margin-top: 0.55rem; flex-wrap: wrap; }
+.cli { display: flex; align-items: center; gap: 0.28rem; font-size: 0.56rem; color: var(--sage-dim); }
+.cld { width: 8px; height: 8px; border-radius: 2px; }
+
+/* Plant modal */
+.modal-bg { display: none; position: fixed; inset: 0; background: rgba(28,34,24,0.6); z-index: 200; align-items: center; justify-content: center; padding: 1.5rem; backdrop-filter: blur(4px); }
+.modal-bg.open { display: flex; }
+.modal { background: var(--paper); border: 1px solid var(--border-hi); border-radius: var(--rl); max-width: 360px; width: 100%; padding: 1.25rem; position: relative; box-shadow: 0 20px 60px rgba(28,34,24,0.25); animation: fadeUp 0.22s ease; max-height: 85vh; overflow-y: auto; }
+.modal-close { position: absolute; top: 0.85rem; right: 0.85rem; width: 26px; height: 26px; border-radius: 4px; border: 1px solid var(--border-hi); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: var(--sage-dim); transition: all 0.12s; }
+.modal-close:hover { border-color: var(--sage); color: var(--leaf); }
+.modal-icon { font-size: 2.8rem; text-align: center; margin-bottom: 0.65rem; }
+.modal-name { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; color: var(--ink); }
+.modal-latin { font-size: 0.65rem; color: var(--sage-dim); font-style: italic; margin-top: 0.1rem; }
+.modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin: 0.75rem 0; }
+.mgi { background: var(--paper2); border: 1px solid var(--border-hi); border-radius: var(--r); padding: 0.5rem 0.65rem; }
+.mgi-l { font-size: 0.54rem; color: var(--sage-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+.mgi-v { font-size: 0.75rem; font-weight: 700; color: var(--leaf); margin-top: 0.15rem; font-family: var(--font-display); }
+.modal-timing { font-size: 0.62rem; color: var(--sage-dim); line-height: 1.7; }
+.modal-timing b { color: var(--leaf); font-weight: 500; }
+
+/* Loading */
+.loader { display: none; position: fixed; inset: 0; background: rgba(245,242,234,0.88); z-index: 300; align-items: center; justify-content: center; flex-direction: column; gap: 1rem; backdrop-filter: blur(6px); }
+.loader.on { display: flex; }
+.loader-ring { width: 40px; height: 40px; border: 2px solid var(--border-hi); border-top-color: var(--leaf); border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loader-msg { font-size: 0.7rem; color: var(--sage-dim); letter-spacing: 0.06em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div class="loader" id="loader">
+  <div class="loader-ring"></div>
+  <div class="loader-msg" id="loader-msg">Scanning coordinates…</div>
+</div>
+
+<div class="modal-bg" id="mbg" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="mc"></div>
+  </div>
+</div>
+
+<div class="shell">
+
+  <!-- ──────────────────── TOP BAR ──────────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon"></div>
+      GrowLocal
+    </div>
+    <div class="topbar-meta">
+      Field Intelligence System <span id="tb-zone">—</span>
+    </div>
+
+    <div class="step-trail">
+      <div class="snode active" id="sn1" onclick="go(1)">01</div>
+      <div class="sconnect" id="sc1"></div>
+      <div class="snode" id="sn2" onclick="go(2)">02</div>
+      <div class="sconnect" id="sc2"></div>
+      <div class="snode" id="sn3" onclick="go(3)">03</div>
+      <div class="sconnect" id="sc3"></div>
+      <div class="snode" id="sn4" onclick="go(4)">04</div>
+      <div class="sconnect" id="sc4"></div>
+      <div class="snode" id="sn5">05</div>
+    </div>
+
+    <div class="api-zone">
+      <span class="api-lbl">Maps API</span>
+      <input class="api-inp" type="password" id="gkey" placeholder="AIza… (Google Tile API)">
+      <span class="api-lbl">Cesium</span>
+      <input class="api-inp" type="password" id="ctoken" placeholder="eyJ… (Cesium ion token)">
+    </div>
+  </header>
+
+  <!-- ──────────────────── LEFT PANEL ──────────────────── -->
+  <aside class="left-panel">
+
+    <!-- STEP 1 -->
+    <div class="step-content active" id="p1">
+      <div class="panel-header">
+        <span class="panel-header-label">Location Target</span>
+        <button class="panel-header-action" title="Help">?</button>
+      </div>
+      <div class="step-heading">
+        <div class="step-num-label">01 — Site Detection</div>
+        <div class="step-title">Where is your <em>land?</em></div>
+        <div class="step-sub">Enter a city, address, or coordinates. We'll lock the 3D globe to your plot and detect your climate zone.</div>
+      </div>
+      <div class="form-block">
+        <div class="field-label">Address or location</div>
+        <input class="text-input" type="text" id="loc-in" placeholder="Austin TX · San José CR · 51.5°N 0.1°W">
+      </div>
+      <div class="form-block" style="padding-top:0">
+        <button class="btn-primary" onclick="locate()">→ Lock onto Location</button>
+      </div>
+
+      <div class="climate-card" id="ccard">
+        <div class="cc-header">
+          <div class="cc-zone-label">Hardiness Zone Detected</div>
+          <div class="cc-zone-name" id="cc-name">—</div>
+          <div class="cc-zone-desc" id="cc-desc">—</div>
+        </div>
+        <div class="cc-stats">
+          <div class="cc-stat"><div class="cc-val" id="cc-temp">—</div><div class="cc-lbl">Summer Avg</div></div>
+          <div class="cc-stat"><div class="cc-val" id="cc-frost">—</div><div class="cc-lbl">Frost-free</div></div>
+          <div class="cc-stat"><div class="cc-val" id="cc-rain">—</div><div class="cc-lbl">Rainfall</div></div>
+        </div>
+      </div>
+
+      <div class="nav-row">
+        <button class="btn-primary" id="btn-next1" disabled onclick="go(2)" style="flex:1">Continue →</button>
+      </div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="step-content" id="p2">
+      <div class="panel-header">
+        <span class="panel-header-label">Plot Dimensions</span>
+        <button class="panel-header-action" onclick="go(1)">←</button>
+      </div>
+      <div class="step-heading">
+        <div class="step-num-label">02 — Space</div>
+        <div class="step-title">Describe your <em>plot</em></div>
+        <div class="step-sub">Define the growing area visible on your 3D view.</div>
+      </div>
+
+      <div class="form-block">
+        <div class="grid-2">
+          <div>
+            <div class="field-label">Width (ft)</div>
+            <input class="num-input" type="number" id="sw" value="20" min="1" max="500" oninput="updSV()">
+          </div>
+          <div>
+            <div class="field-label">Length (ft)</div>
+            <input class="num-input" type="number" id="sl" value="30" min="1" max="500" oninput="updSV()">
+          </div>
+        </div>
+      </div>
+
+      <div class="space-preview">
+        <div class="sp-box" id="spbox" style="width:110px;height:74px">
+          <span class="sp-label" id="splbl">20 × 30</span>
+        </div>
+        <div class="sp-stats">
+          <div><div class="sp-stat-v" id="sp-sqft">600</div><div class="sp-stat-l">Sq ft</div></div>
+          <div><div class="sp-stat-v" id="sp-beds">37</div><div class="sp-stat-l">Bed units</div></div>
+        </div>
+      </div>
+
+      <div class="form-block">
+        <div class="field-label">Sunlight</div>
+        <div class="chip-grid">
+          <div class="sun-chip on" onclick="selSun('full',this)"><div class="si">☀️</div><div class="sl">Full Sun</div><div class="ss">6+ hrs</div></div>
+          <div class="sun-chip" onclick="selSun('partial',this)"><div class="si">⛅</div><div class="sl">Partial</div><div class="ss">3–6 hrs</div></div>
+          <div class="sun-chip" onclick="selSun('shade',this)"><div class="si">🌥</div><div class="sl">Shade</div><div class="ss">&lt;3 hrs</div></div>
+        </div>
+      </div>
+
+      <div class="form-block">
+        <div class="grid-2">
+          <div>
+            <div class="field-label">Space type</div>
+            <select class="select-input" id="stype">
+              <option value="raised">Raised beds</option>
+              <option value="inground">In-ground</option>
+              <option value="container">Containers</option>
+              <option value="mixed">Mixed</option>
+            </select>
+          </div>
+          <div>
+            <div class="field-label">Soil quality</div>
+            <select class="select-input" id="squality">
+              <option value="excellent">Excellent</option>
+              <option value="good" selected>Good</option>
+              <option value="poor">Poor</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-row">
+        <button class="btn-ghost" onclick="go(1)">← Back</button>
+        <button class="btn-primary" onclick="go(3)" style="flex:1">Continue →</button>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="step-content" id="p3">
+      <div class="panel-header">
+        <span class="panel-header-label">Growing Goals</span>
+        <button class="panel-header-action" onclick="go(2)">←</button>
+      </div>
+      <div class="step-heading">
+        <div class="step-num-label">03 — Goals</div>
+        <div class="step-title">What do you want to <em>grow?</em></div>
+        <div class="step-sub">Select all that apply.</div>
+      </div>
+
+      <div class="form-block">
+        <div class="field-label">Growing goals</div>
+        <div class="chip-grid">
+          <div class="chip on" onclick="toggleGoal(this,'staple-food')"><div class="chip-icon">🥦</div><div class="chip-label">Staple Veg</div></div>
+          <div class="chip" onclick="toggleGoal(this,'herbs')"><div class="chip-icon">🌿</div><div class="chip-label">Fresh Herbs</div></div>
+          <div class="chip" onclick="toggleGoal(this,'fruit')"><div class="chip-icon">🍓</div><div class="chip-label">Fruit</div></div>
+          <div class="chip" onclick="toggleGoal(this,'calorie-dense')"><div class="chip-icon">🥔</div><div class="chip-label">Calorie Crops</div></div>
+          <div class="chip" onclick="toggleGoal(this,'perennial')"><div class="chip-icon">🌳</div><div class="chip-label">Perennials</div></div>
+          <div class="chip" onclick="toggleGoal(this,'preservation')"><div class="chip-icon">🫙</div><div class="chip-label">Preserving</div></div>
+          <div class="chip" onclick="toggleGoal(this,'medicinal')"><div class="chip-icon">🌼</div><div class="chip-label">Medicinal</div></div>
+          <div class="chip" onclick="toggleGoal(this,'pollinator')"><div class="chip-icon">🐝</div><div class="chip-label">Pollinators</div></div>
+          <div class="chip" onclick="toggleGoal(this,'lowmaint')"><div class="chip-icon">😌</div><div class="chip-label">Low Effort</div></div>
+        </div>
+      </div>
+
+      <div class="form-block">
+        <div class="field-label">Experience level</div>
+        <div class="chip-grid">
+          <div class="chip on" onclick="selSingle(this,'exp','beginner')"><div class="chip-icon">🌱</div><div class="chip-label">Beginner</div></div>
+          <div class="chip" onclick="selSingle(this,'exp','intermediate')"><div class="chip-icon">🌿</div><div class="chip-label">Intermediate</div></div>
+          <div class="chip" onclick="selSingle(this,'exp','experienced')"><div class="chip-icon">🌳</div><div class="chip-label">Experienced</div></div>
+        </div>
+      </div>
+
+      <div class="nav-row">
+        <button class="btn-ghost" onclick="go(2)">← Back</button>
+        <button class="btn-primary" onclick="go(4)" style="flex:1">Continue →</button>
+      </div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div class="step-content" id="p4">
+      <div class="panel-header">
+        <span class="panel-header-label">Household</span>
+        <button class="panel-header-action" onclick="go(3)">←</button>
+      </div>
+      <div class="step-heading">
+        <div class="step-num-label">04 — People</div>
+        <div class="step-title">Who are you <em>feeding?</em></div>
+        <div class="step-sub">Sets yield targets and variety selection.</div>
+      </div>
+
+      <div class="form-block">
+        <div class="field-label">Number of people</div>
+        <div class="counter-row">
+          <button class="ctr-btn" onclick="chP(-1)">−</button>
+          <div class="ctr-num" id="pnum">4</div>
+          <button class="ctr-btn" onclick="chP(1)">+</button>
+          <span class="ctr-unit">people</span>
+        </div>
+      </div>
+
+      <div class="form-block">
+        <div class="field-label">Dietary preference</div>
+        <div class="chip-grid">
+          <div class="chip on" onclick="selSingle(this,'diet','omnivore')"><div class="chip-icon">🍽</div><div class="chip-label">Omnivore</div></div>
+          <div class="chip" onclick="selSingle(this,'diet','vegetarian')"><div class="chip-icon">🥗</div><div class="chip-label">Vegetarian</div></div>
+          <div class="chip" onclick="selSingle(this,'diet','vegan')"><div class="chip-icon">🌱</div><div class="chip-label">Vegan</div></div>
+        </div>
+      </div>
+
+      <div class="form-block">
+        <div class="field-label">Self-sufficiency target <span class="val" id="sufv">40%</span></div>
+        <input type="range" min="10" max="100" step="10" value="40" id="sufr" oninput="document.getElementById('sufv').textContent=this.value+'%'">
+        <div style="font-size:0.58rem;color:var(--sage-dim);margin-top:0.35rem">What share of your vegetables to grow yourself?</div>
+      </div>
+
+      <div class="nav-row">
+        <button class="btn-ghost" onclick="go(3)">← Back</button>
+        <button class="btn-primary" onclick="genPlan()" style="flex:1">🌱 Generate Plan</button>
+      </div>
+    </div>
+
+    <!-- STEP 5 — Results left panel -->
+    <div class="step-content" id="p5">
+      <div class="res-summary">
+        <div class="res-loc" id="res-loc">—</div>
+        <div class="res-title">Field Growing Plan</div>
+        <div class="res-stats-row">
+          <div class="rst"><div class="rst-v" id="r-plants">—</div><div class="rst-l">Plants</div></div>
+          <div class="rst"><div class="rst-v" id="r-sqft">—</div><div class="rst-l">Sq ft</div></div>
+          <div class="rst"><div class="rst-v" id="r-yield">—</div><div class="rst-l">Est lbs/yr</div></div>
+        </div>
+      </div>
+      <div class="ai-strip" id="ai-strip"></div>
+
+      <div class="panel-header" style="position:sticky;top:0">
+        <span class="panel-header-label">Plant Intelligence</span>
+        <span style="font-size:0.56rem;color:var(--sage-dim)">click to expand</span>
+      </div>
+      <div id="plant-rows"></div>
+
+      <div class="nav-row">
+        <button class="btn-ghost" onclick="go(1)" style="flex:1">← Start Over</button>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ──────────────────── MAP CENTER ──────────────────── -->
+  <main class="map-zone">
+
+    <div class="scope-wrap">
+      <!-- Outer decorative ring -->
+      <div class="scope-ring-outer"></div>
+
+      <!-- Bracket corners -->
+      <div class="scope-brackets">
+        <div class="scope-bracket tl"></div>
+        <div class="scope-bracket tr"></div>
+        <div class="scope-bracket bl"></div>
+        <div class="scope-bracket br"></div>
+      </div>
+
+      <!-- Crosshair -->
+      <div class="scope-crosshair"></div>
+
+      <!-- Circular Cesium viewport -->
+      <div class="scope-viewport">
+        <div class="scope-empty" id="scope-empty">
+          <div class="scope-empty-icon"></div>
+          <p>Enter your location<br>to scan your plot</p>
+        </div>
+        <div class="scope-vignette"></div>
+        <div id="cesiumContainer"></div>
+      </div>
+
+      <!-- HUD readout -->
+      <div class="scope-readout" id="scope-readout" style="display:none">
+        <div class="bright" id="sr-zone">—</div>
+        <div id="sr-coords">—</div>
+        <div id="sr-season">—</div>
+      </div>
+    </div>
+
+    <!-- HUD chips above / below map -->
+    <div class="hud-top" id="hud-top" style="display:none">
+      <div class="hud-chip"><div class="dot"></div> Zone <span class="val" id="h-zone">—</span></div>
+      <div class="hud-chip"><span class="val" id="h-season">—</span></div>
+    </div>
+    <div class="hud-bottom" id="hud-bottom" style="display:none">
+      <div class="hud-chip"><span id="h-coords">—</span></div>
+      <div class="hud-chip"><span id="h-sqft">— sq ft</span></div>
+    </div>
+
+  </main>
+
+  <!-- ──────────────────── RIGHT PANEL ──────────────────── -->
+  <aside class="right-panel" id="right-panel">
+
+    <!-- Placeholder before plan generated -->
+    <div id="rp-placeholder">
+      <div class="panel-header">
+        <span class="panel-header-label">Seasonal Guide</span>
+      </div>
+      <div style="padding:2rem 1rem;text-align:center;">
+        <div style="font-size:2rem;margin-bottom:0.75rem">🌿</div>
+        <div style="font-size:0.65rem;color:var(--sage-dim);line-height:1.7;text-transform:uppercase;letter-spacing:0.06em">Complete setup<br>to see seasonal<br>planting guidance</div>
+      </div>
+    </div>
+
+    <!-- Results right panel -->
+    <div id="rp-results" style="display:none">
+      <div class="rtabs">
+        <div class="rtab on" onclick="rTab('seasonal')">Seasonal</div>
+        <div class="rtab" onclick="rTab('monthly')">Monthly</div>
+        <div class="rtab" onclick="rTab('calendar')">Calendar</div>
+        <div class="rtab" onclick="rTab('tips')">Tips</div>
+      </div>
+
+      <!-- SEASONAL -->
+      <div class="rtp on" id="rtp-seasonal">
+        <div class="frost-strip" id="frost-strip"></div>
+        <div class="season-tabs" id="stabs"></div>
+        <div class="season-body" id="sbody"></div>
+      </div>
+
+      <!-- MONTHLY -->
+      <div class="rtp" id="rtp-monthly">
+        <div class="month-pills" id="mpills"></div>
+        <div class="month-detail">
+          <div class="month-detail-cols" id="mdcols"></div>
+        </div>
+      </div>
+
+      <!-- CALENDAR -->
+      <div class="rtp" id="rtp-calendar">
+        <div class="cal-wrap">
+          <div class="cgrid" id="cgrid"></div>
+          <div class="cleg">
+            <div class="cli"><div class="cld" style="background:var(--leaf)"></div>Sow</div>
+            <div class="cli"><div class="cld" style="background:var(--sage-dim)"></div>Growing</div>
+            <div class="cli"><div class="cld" style="background:var(--amber)"></div>Harvest</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TIPS -->
+      <div class="rtp" id="rtp-tips">
+        <ul class="tips-list" id="tips-list"></ul>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ──────────────────── BOTTOM BAR ──────────────────── -->
+  <footer class="bottombar">
+    <div class="bticker">Status <span id="bt-status">Awaiting location lock</span></div>
+    <div class="bticker-scroll">
+      <div class="bticker-text">
+        GROW LOCAL FIELD INTELLIGENCE SYSTEM &nbsp;·&nbsp; CLIMATE-ADAPTIVE PLANTING RECOMMENDATIONS &nbsp;·&nbsp; REAL-TIME 3D PLOT VISUALIZATION &nbsp;·&nbsp; ZONE-CALIBRATED SEASONAL GUIDANCE &nbsp;·&nbsp; PHOTOREALISTIC SATELLITE OVERLAY &nbsp;·&nbsp; FROST DATE INTELLIGENCE &nbsp;·&nbsp; MONTH-BY-MONTH ACTION PLANS &nbsp;·&nbsp; AI-GENERATED AGRONOMIC INSIGHT &nbsp;·&nbsp;
+      </div>
+    </div>
+    <div class="bticker" id="bt-date" style="font-size:0.55rem"></div>
+  </footer>
+
+</div><!-- shell -->
+
+<script>
+// ════════════════════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════════════════════
+const S = {
+  lat:null,lng:null,zone:null,zd:null,
+  location:'',w:20,l:30,sun:'full',
+  stype:'raised',sq:'good',
+  people:4,goals:['staple-food'],
+  exp:'beginner',diet:'omnivore',suf:40,
+  viewer:null
+};
+const MS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+// Date ticker
+const now = new Date();
+document.getElementById('bt-date').textContent = now.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+// ════════════════════════════════════════════════════════════
+// NAV
+// ════════════════════════════════════════════════════════════
+function go(n) {
+  if (n > 1 && !S.zone) return;
+  document.querySelectorAll('.step-content').forEach(p => p.classList.remove('active'));
+  document.getElementById('p' + n).classList.add('active');
+  for (let i = 1; i <= 5; i++) {
+    const nd = document.getElementById('sn' + i);
+    nd.classList.remove('active','done');
+    if (i === n) nd.classList.add('active');
+    else if (i < n) nd.classList.add('done');
+    const c = document.getElementById('sc' + i);
+    if (c) c.classList.toggle('done', i < n);
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// CESIUM
+// ════════════════════════════════════════════════════════════
+function initCesium() {
+  if (S.viewer) return;
+  const ct = document.getElementById('ctoken').value.trim();
+  Cesium.Ion.defaultAccessToken = ct || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc4ZjMiLCJpZCI6MjU5LCJpYXQiOjE1MTgxNzI4MTV9.2D3tmvl-YkFMHgGgnv-WkXPN5JMt4dRNfGk3-MoU7hk';
+  try {
+    S.viewer = new Cesium.Viewer('cesiumContainer', {
+      imageryProvider: false, baseLayerPicker: false, geocoder: false,
+      homeButton: false, sceneModePicker: false, navigationHelpButton: false,
+      animation: false, timeline: false, fullscreenButton: false,
+      requestRenderMode: true, creditContainer: document.createElement('div')
+    });
+    const gk = document.getElementById('gkey').value.trim();
+    if (gk) {
+      try {
+        S.viewer.scene.primitives.add(new Cesium.Cesium3DTileset({
+          url: `https://tile.googleapis.com/v1/3dtiles/root.json?key=${gk}`,
+          showCreditsOnScreen: true
+        }));
+      } catch(e) { loadFallback(); }
+    } else { loadFallback(); }
+    try { S.viewer.scene.skyBox.show = false; S.viewer.scene.sun.show = false; S.viewer.scene.moon.show = false; } catch(e){}
+    S.viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#B8C8A8');
+  } catch(e) { console.log('Cesium error', e); }
+}
+
+function loadFallback() {
+  try { S.viewer && S.viewer.imageryLayers.addImageryProvider(new Cesium.IonImageryProvider({assetId:3})); } catch(e){}
+}
+
+function flyTo(lat, lng, alt) {
+  if (!S.viewer) initCesium();
+  document.getElementById('scope-empty').classList.add('gone');
+  document.getElementById('hud-top').style.display = 'flex';
+  document.getElementById('hud-bottom').style.display = 'flex';
+  document.getElementById('scope-readout').style.display = 'block';
+  try {
+    S.viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(lng, lat, alt || 700),
+      orientation: { heading: Cesium.Math.toRadians(10), pitch: Cesium.Math.toRadians(-50), roll: 0 },
+      duration: 3
+    });
+  } catch(e){}
+  document.getElementById('h-coords').textContent = lat.toFixed(4) + '°, ' + lng.toFixed(4) + '°';
+  document.getElementById('sr-coords').textContent = lat.toFixed(4) + '°N ' + Math.abs(lng).toFixed(4) + '°W';
+}
+
+// ════════════════════════════════════════════════════════════
+// LOCATION
+// ════════════════════════════════════════════════════════════
+async function locate() {
+  const q = document.getElementById('loc-in').value.trim();
+  if (!q) return;
+  showL('Locking onto coordinates…');
+  initCesium();
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`);
+    const d = await r.json();
+    if (!d.length) { hideL(); alert('Location not found.'); return; }
+    S.lat = parseFloat(d[0].lat); S.lng = parseFloat(d[0].lon);
+    S.location = d[0].display_name.split(',').slice(0,3).join(',').trim();
+    const zd = zoneFor(S.lat); S.zone = zd.zone; S.zd = zd;
+    document.getElementById('cc-name').textContent = 'Zone ' + zd.zone + ' — ' + zd.label;
+    document.getElementById('cc-desc').textContent = zd.description;
+    document.getElementById('cc-temp').textContent = zd.avgTemp;
+    document.getElementById('cc-frost').textContent = zd.frostFree;
+    document.getElementById('cc-rain').textContent = zd.rainfall;
+    document.getElementById('ccard').classList.add('show');
+    document.getElementById('btn-next1').disabled = false;
+    document.getElementById('tb-zone').textContent = '// Zone ' + zd.zone + ' · ' + zd.label;
+    document.getElementById('h-zone').textContent = zd.zone;
+    const cs = curSeason(new Date().getMonth() + 1);
+    document.getElementById('h-season').textContent = cs.toUpperCase();
+    document.getElementById('sr-zone').textContent = 'Zone ' + zd.zone + ' · ' + zd.label;
+    document.getElementById('sr-season').textContent = cs.toUpperCase();
+    document.getElementById('bt-status').textContent = S.location + ' · Zone ' + zd.zone;
+    flyTo(S.lat, S.lng, 700);
+  } catch(e) { alert('Could not find location.'); }
+  hideL();
+}
+
+function zoneFor(lat) {
+  const a = Math.abs(lat);
+  if (a < 15) return {zone:'12-13',label:'Tropical',avgTemp:'90–95°F',frostFree:'365 days',rainfall:'60–120"',description:'Year-round growing season. Excellent for tropical fruits, root crops, and fast-cycling vegetables.'};
+  if (a < 25) return {zone:'10-11',label:'Subtropical',avgTemp:'85–90°F',frostFree:'300–365 days',rainfall:'40–80"',description:'Near year-round growing. Two main seasons — avoid cool crops in peak summer heat.'};
+  if (a < 32) return {zone:'8b-9b',label:'Warm Temperate',avgTemp:'78–84°F',frostFree:'220–270 days',rainfall:'30–55"',description:'Long warm season, mild winters. Excellent for tomatoes, peppers, citrus, and winter greens.'};
+  if (a < 38) return {zone:'7a-8a',label:'Mild Temperate',avgTemp:'72–80°F',frostFree:'180–220 days',rainfall:'28–48"',description:'Strong four seasons. Two productive windows — spring and fall ideal for brassicas and roots.'};
+  if (a < 44) return {zone:'5b-6b',label:'Cool Temperate',avgTemp:'65–74°F',frostFree:'140–175 days',rainfall:'25–40"',description:'Clear summer and fall harvests. Frost arrives early October. Season extension recommended.'};
+  if (a < 50) return {zone:'4a-5a',label:'Northern Temperate',avgTemp:'58–66°F',frostFree:'100–140 days',rainfall:'20–35"',description:'Short, intense summer. Focus on fast-maturing varieties. Cold frames extend the season.'};
+  return {zone:'2b-3b',label:'Subarctic',avgTemp:'48–58°F',frostFree:'60–100 days',rainfall:'12–25"',description:'Very short growing season. Hardy root crops and greens essential. Season extension critical.'};
+}
+
+// ════════════════════════════════════════════════════════════
+// SPACE VIZ
+// ════════════════════════════════════════════════════════════
+function updSV() {
+  S.w = parseFloat(document.getElementById('sw').value) || 20;
+  S.l = parseFloat(document.getElementById('sl').value) || 30;
+  const sqft = S.w * S.l, scale = Math.min(120/Math.max(S.w, S.l), 5);
+  const bw = Math.max(44, Math.min(160, S.w*scale)), bh = Math.max(36, Math.min(120, S.l*scale));
+  const b = document.getElementById('spbox'); b.style.width = bw+'px'; b.style.height = bh+'px';
+  document.getElementById('splbl').textContent = S.w + ' × ' + S.l;
+  document.getElementById('sp-sqft').textContent = sqft.toLocaleString();
+  document.getElementById('sp-beds').textContent = Math.round(sqft/16);
+  document.getElementById('h-sqft').textContent = sqft.toLocaleString() + ' sq ft';
+}
+updSV();
+
+function selSun(v, el) { S.sun = v; document.querySelectorAll('.sun-chip').forEach(e=>e.classList.remove('on')); el.classList.add('on'); }
+function toggleGoal(el, g) { el.classList.toggle('on'); if (S.goals.includes(g)) S.goals=S.goals.filter(x=>x!==g); else S.goals.push(g); }
+function selSingle(el, key, val) { el.parentElement.querySelectorAll('.chip').forEach(e=>e.classList.remove('on')); el.classList.add('on'); S[key]=val; }
+function chP(d) { S.people = Math.max(1,Math.min(20,S.people+d)); document.getElementById('pnum').textContent=S.people; }
+
+// ════════════════════════════════════════════════════════════
+// PLANTS DB
+// ════════════════════════════════════════════════════════════
+const PDB=[
+  {name:'Tomato',latin:'Solanum lycopersicum',icon:'🍅',tags:['Full sun','Warm season'],yield:'15–30 lbs',days:75,zones:['5b-6b','7a-8a','8b-9b','10-11','12-13'],type:'vegetable',cal:18,sow:[3,4],grow:[5,6,7,8],harvest:[7,8,9,10],goals:['staple-food','preservation'],diff:'beginner'},
+  {name:'Zucchini',latin:'Cucurbita pepo',icon:'🥒',tags:['Full sun','Prolific'],yield:'8–12 lbs',days:50,zones:['4a-5a','5b-6b','7a-8a','8b-9b','10-11'],type:'vegetable',cal:17,sow:[4,5],grow:[5,6,7],harvest:[6,7,8,9],goals:['staple-food'],diff:'beginner'},
+  {name:'Kale',latin:'Brassica oleracea',icon:'🥬',tags:['Part shade','Cool season'],yield:'2–5 lbs',days:60,zones:['3b-4b','4a-5a','5b-6b','7a-8a','8b-9b'],type:'vegetable',cal:49,sow:[2,3,8,9],grow:[3,4,5,9,10,11],harvest:[4,5,6,10,11,12],goals:['staple-food','lowmaint'],diff:'beginner'},
+  {name:'Sweet Potato',latin:'Ipomoea batatas',icon:'🍠',tags:['Full sun','Calorie dense'],yield:'5–10 lbs',days:90,zones:['7a-8a','8b-9b','10-11','12-13'],type:'root',cal:86,sow:[4,5],grow:[5,6,7,8],harvest:[9,10,11],goals:['calorie-dense','staple-food'],diff:'intermediate'},
+  {name:'Basil',latin:'Ocimum basilicum',icon:'🌿',tags:['Full sun','Annual herb'],yield:'0.5–1 lb',days:40,zones:['5b-6b','7a-8a','8b-9b','10-11','12-13'],type:'herb',cal:23,sow:[4,5],grow:[5,6,7,8],harvest:[6,7,8,9],goals:['herbs'],diff:'beginner'},
+  {name:'Strawberry',latin:'Fragaria × ananassa',icon:'🍓',tags:['Full sun','Perennial'],yield:'1–2 lbs',days:60,zones:['4a-5a','5b-6b','7a-8a','8b-9b'],type:'fruit',cal:32,sow:[3,4],grow:[4,5,6],harvest:[5,6,7],goals:['fruit','perennial'],diff:'beginner'},
+  {name:'Garlic',latin:'Allium sativum',icon:'🧄',tags:['Full sun','Fall plant'],yield:'0.2–0.4 lb/bulb',days:240,zones:['3b-4b','4a-5a','5b-6b','7a-8a','8b-9b'],type:'vegetable',cal:149,sow:[9,10,11],grow:[11,12,1,2,3,4,5],harvest:[6,7],goals:['staple-food','preservation'],diff:'beginner'},
+  {name:'Pepper',latin:'Capsicum annuum',icon:'🫑',tags:['Full sun','Warm season'],yield:'2–5 lbs',days:80,zones:['5b-6b','7a-8a','8b-9b','10-11','12-13'],type:'vegetable',cal:20,sow:[3,4],grow:[5,6,7,8],harvest:[7,8,9,10],goals:['staple-food','preservation'],diff:'beginner'},
+  {name:'Butternut Squash',latin:'Cucurbita moschata',icon:'🍂',tags:['Full sun','Storage'],yield:'5–10 lbs',days:85,zones:['4a-5a','5b-6b','7a-8a','8b-9b'],type:'vegetable',cal:45,sow:[4,5],grow:[5,6,7,8],harvest:[9,10,11],goals:['calorie-dense','preservation'],diff:'beginner'},
+  {name:'Spinach',latin:'Spinacia oleracea',icon:'🥬',tags:['Part shade','Fast'],yield:'1–2 lbs/sqft',days:40,zones:['3b-4b','4a-5a','5b-6b','7a-8a'],type:'vegetable',cal:23,sow:[2,3,8,9],grow:[3,4,5,9,10,11],harvest:[4,5,6,10,11],goals:['staple-food','lowmaint'],diff:'beginner'},
+  {name:'Rosemary',latin:'Salvia rosmarinus',icon:'🌿',tags:['Full sun','Perennial'],yield:'0.5–2 lbs/yr',days:180,zones:['6b-7a','7a-8a','8b-9b','10-11'],type:'herb',cal:131,sow:[2,3],grow:[3,4,5,6,7,8,9,10,11,12],harvest:[4,5,6,7,8,9,10,11],goals:['herbs','perennial','lowmaint'],diff:'beginner'},
+  {name:'Blueberry',latin:'Vaccinium corymbosum',icon:'🫐',tags:['Part sun','Perennial'],yield:'5–10 lbs',days:365,zones:['4a-5a','5b-6b','7a-8a'],type:'fruit',cal:57,sow:[3,4],grow:[4,5,6,7],harvest:[6,7,8],goals:['fruit','perennial'],diff:'intermediate'},
+  {name:'Mint',latin:'Mentha spicata',icon:'🌱',tags:['Part shade','Vigorous'],yield:'1–3 lbs',days:30,zones:['3b-4b','4a-5a','5b-6b','7a-8a','8b-9b','10-11'],type:'herb',cal:70,sow:[3,4],grow:[4,5,6,7,8,9],harvest:[5,6,7,8,9,10],goals:['herbs','medicinal'],diff:'beginner'},
+  {name:'Echinacea',latin:'Echinacea purpurea',icon:'🌸',tags:['Full sun','Perennial'],yield:'1oz dried',days:90,zones:['3b-4b','4a-5a','5b-6b','7a-8a'],type:'flower',cal:0,sow:[3,4],grow:[4,5,6,7,8],harvest:[8,9,10],goals:['medicinal','pollinator','perennial'],diff:'beginner'},
+  {name:'Sunflower',latin:'Helianthus annuus',icon:'🌻',tags:['Full sun','Pollinator'],yield:'1–3oz seeds',days:80,zones:['4a-5a','5b-6b','7a-8a','8b-9b','10-11'],type:'flower',cal:584,sow:[4,5],grow:[5,6,7],harvest:[8,9],goals:['pollinator','calorie-dense'],diff:'beginner'},
+  {name:'Lavender',latin:'Lavandula angustifolia',icon:'💜',tags:['Full sun','Perennial'],yield:'0.5–1 lb dried',days:365,zones:['5b-6b','7a-8a','8b-9b'],type:'herb',cal:49,sow:[2,3],grow:[3,4,5,6,7,8,9,10],harvest:[6,7,8],goals:['medicinal','pollinator','perennial'],diff:'beginner'},
+  {name:'Green Beans',latin:'Phaseolus vulgaris',icon:'🫘',tags:['Full sun','Annual'],yield:'1–2 lbs',days:55,zones:['4a-5a','5b-6b','7a-8a','8b-9b','10-11'],type:'vegetable',cal:31,sow:[4,5,6],grow:[5,6,7,8],harvest:[7,8,9],goals:['staple-food','preservation'],diff:'beginner'},
+  {name:'Carrot',latin:'Daucus carota',icon:'🥕',tags:['Full sun','Root crop'],yield:'1–2 lbs/row',days:70,zones:['3b-4b','4a-5a','5b-6b','7a-8a','8b-9b'],type:'root',cal:41,sow:[3,4,7,8],grow:[4,5,6,8,9,10],harvest:[6,7,8,10,11],goals:['staple-food','calorie-dense'],diff:'beginner'},
+  {name:'Fig',latin:'Ficus carica',icon:'🌿',tags:['Full sun','Tree'],yield:'20–50 lbs',days:365,zones:['7a-8a','8b-9b','10-11','12-13'],type:'fruit',cal:74,sow:[2,3],grow:[3,4,5,6,7,8,9],harvest:[7,8,9,10],goals:['fruit','perennial'],diff:'intermediate'},
+];
+
+function zlat(z){return{'12-13':0,'10-11':1,'8b-9b':2,'7a-8a':3,'5b-6b':4,'4a-5a':5,'2b-3b':6,'3b-4b':5.5}[z]??3;}
+function curSeason(m){if([3,4,5].includes(m))return'spring';if([6,7,8].includes(m))return'summer';if([9,10,11].includes(m))return'fall';return'winter';}
+
+// ════════════════════════════════════════════════════════════
+// GENERATE PLAN
+// ════════════════════════════════════════════════════════════
+async function genPlan() {
+  S.suf = parseInt(document.getElementById('sufr').value);
+  S.stype = document.getElementById('stype').value;
+  S.sq = document.getElementById('squality').value;
+  showL('Cultivating your plan…');
+  const plants = rankP(filterP());
+  go(5);
+  renderAll(plants);
+  if (S.viewer && S.lat) {
+    try { S.viewer.camera.flyTo({destination:Cesium.Cartesian3.fromDegrees(S.lng,S.lat,250),orientation:{heading:Cesium.Math.toRadians(0),pitch:Cesium.Math.toRadians(-60),roll:0},duration:2.5}); } catch(e){}
+  }
+  await getAI(plants);
+  hideL();
+}
+
+function filterP() {
+  const zl = zlat(S.zone||'5b-6b');
+  return PDB.filter(p => {
+    if (S.sun==='shade' && p.tags.includes('Full sun') && !p.tags.some(t=>t.includes('shade'))) return false;
+    if (!p.zones.some(pz => Math.abs(zlat(pz)-zl)<=1)) return false;
+    if (S.goals.length>0) return p.goals.some(g=>S.goals.includes(g));
+    return true;
+  });
+}
+function rankP(plants) {
+  return plants.map(p=>{
+    let sc=0;
+    if(S.exp==='beginner'&&p.diff==='beginner')sc+=3;
+    if(S.diet==='vegan'&&p.type==='vegetable')sc+=2;
+    if(S.diet==='vegetarian'&&['vegetable','fruit','herb'].includes(p.type))sc+=1;
+    p.goals.forEach(g=>{if(S.goals.includes(g))sc+=2;});
+    if(S.suf>60&&p.cal>50)sc+=2;
+    return{...p,sc};
+  }).sort((a,b)=>b.sc-a.sc).slice(0,12);
+}
+
+// ════════════════════════════════════════════════════════════
+// RENDER
+// ════════════════════════════════════════════════════════════
+function renderAll(plants) {
+  const sqft = S.w * S.l;
+  document.getElementById('res-loc').textContent = S.location + ' · Zone ' + S.zone;
+  document.getElementById('r-plants').textContent = plants.length;
+  document.getElementById('r-sqft').textContent = sqft.toLocaleString();
+  const ey = Math.round(plants.slice(0,6).reduce((a,p)=>a+(parseFloat(p.yield.split('–')[1])||5)*4,0));
+  document.getElementById('r-yield').textContent = ey.toLocaleString();
+
+  // Plant rows (WorldView "data layer" style)
+  const rows = document.getElementById('plant-rows');
+  rows.innerHTML = '';
+  plants.forEach((p, i) => {
+    const div = document.createElement('div');
+    div.className = 'plant-row';
+    div.onclick = () => showModal(p);
+    const rankColors = ['background:rgba(74,124,63,0.15);color:var(--leaf)','background:rgba(122,158,106,0.1);color:var(--sage-dim)','background:rgba(194,123,42,0.1);color:var(--amber)'];
+    const rankStyle = i < 4 ? rankColors[0] : i < 8 ? rankColors[1] : rankColors[2];
+    div.innerHTML = `
+      <div class="pr-icon">${p.icon}</div>
+      <div class="pr-info">
+        <div class="pr-name">${p.name}</div>
+        <div class="pr-latin">${p.latin}</div>
+        <div class="pr-tags">
+          ${p.tags.map(t=>`<span class="pr-tag tag-green">${t}</span>`).join('')}
+          <span class="pr-tag tag-amber">${p.days}d</span>
+        </div>
+      </div>
+      <div class="pr-right">
+        <div class="pr-days">yield</div>
+        <div class="pr-yield">${p.yield}</div>
+      </div>
+      <div class="pr-toggle on" onclick="event.stopPropagation();this.classList.toggle('on')"></div>`;
+    rows.appendChild(div);
+  });
+
+  // Show right panel results
+  document.getElementById('rp-placeholder').style.display = 'none';
+  document.getElementById('rp-results').style.display = 'block';
+
+  // Update status bar
+  document.getElementById('bt-status').textContent = plants.length + ' plants recommended · ' + sqft.toLocaleString() + ' sq ft · Zone ' + S.zone;
+
+  renderCal(plants.slice(0,8));
+  renderSeasonal(plants);
+  renderMonthly(plants);
+  renderTips();
+}
+
+function renderCal(plants) {
+  const g = document.getElementById('cgrid'); g.innerHTML = '';
+  const blank = document.createElement('div'); g.appendChild(blank);
+  MS.forEach(m => { const h=document.createElement('div'); h.className='cmh'; h.textContent=m; g.appendChild(h); });
+  plants.forEach(p => {
+    const nc = document.createElement('div'); nc.className='cnc'; nc.innerHTML=`<span>${p.icon}</span><span style="overflow:hidden;text-overflow:ellipsis">${p.name}</span>`; g.appendChild(nc);
+    for(let mo=1;mo<=12;mo++){const c=document.createElement('div');c.className='cc '+(p.sow.includes(mo)?'cs':p.harvest.includes(mo)?'ch':p.grow.includes(mo)?'cg':'ce');g.appendChild(c);}
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+// SEASONAL DATA
+// ════════════════════════════════════════════════════════════
+const ZS={
+  0:{lf:'None',ff:'None',gw:'365 days',s:{spring:{s:[{i:'🌽',n:'Corn',d:'After rains begin'},{i:'🫘',n:'Yardlong beans',d:'Direct sow'},{i:'🥬',n:'Water spinach',d:'Grows fast'}],h:[{i:'🥭',n:'Mango',d:'Peak season'},{i:'🍌',n:'Banana',d:'Continuous'},{i:'🍍',n:'Pineapple',d:'Mid-summer'}],t:['Prepare beds before monsoon','Install drainage channels','Add compost before rains','Set up shade cloth for July'],a:'Monsoon approaching — ensure drainage before planting.'},summer:{s:[{i:'🍠',n:'Sweet potato',d:'Slips now'},{i:'🌿',n:'Moringa',d:'Fast growing'},{i:'🎃',n:'Pumpkin',d:'Before rains peak'}],h:[{i:'🫘',n:'Beans',d:'Continuous'},{i:'🥥',n:'Coconut',d:'Year-round'},{i:'🍅',n:'Tomato',d:'If watered well'}],t:['Monitor daily for rot','Harvest frequently','Stake tall plants','Drain standing water'],a:'Tropical rains peak — check plants daily.'},fall:{s:[{i:'🥦',n:'Broccoli',d:'Cool-season window'},{i:'🥬',n:'Bok choy',d:'Fast 45 days'},{i:'🧅',n:'Onion',d:'Sets or transplants'}],h:[{i:'🎃',n:'Pumpkin',d:'Dry season harvest'},{i:'🌽',n:'Corn',d:'After summer'},{i:'🫘',n:'Beans',d:'Dry for storage'}],t:['Plant cool crops as temps drop','Dry harvest beans','Add organic matter','Plan crop rotation'],a:null},winter:{s:[{i:'🥬',n:'Lettuce',d:'Best in cool months'},{i:'🥕',n:'Carrot',d:'Direct sow now'},{i:'🫑',n:'Bell pepper',d:'Continues fruiting'}],h:[{i:'🧄',n:'Garlic',d:'If planted in fall'},{i:'🥦',n:'Broccoli',d:'Cool-season harvest'},{i:'🌿',n:'Herbs',d:'Year-round'}],t:['Irrigate consistently — dry season','Order seeds for rainy season','Prune fruit trees','Apply mulch'],a:null}}},
+  1:{lf:'Late Jan – mid Feb',ff:'Late Nov – mid Dec',gw:'300–365 days',s:{spring:{s:[{i:'🍅',n:'Tomato',d:'8 wks before last frost'},{i:'🫑',n:'Pepper',d:'10 wks head start'},{i:'🍆',n:'Eggplant',d:'Start early'}],h:[{i:'🍓',n:'Strawberry',d:'Spring flush'},{i:'🫛',n:'Snap peas',d:'Before heat'},{i:'🥬',n:'Lettuce',d:'Last before bolting'}],t:['Harden off seedlings','Prepare beds with compost','Install drip irrigation','Succession sow lettuce'],a:'Last frost window — protect transplants on cold nights.'},summer:{s:[{i:'🍅',n:'Tomato',d:'Transplant out'},{i:'🫑',n:'Pepper',d:'Thrives in heat'},{i:'🌽',n:'Corn',d:'Direct sow in blocks'}],h:[{i:'🥒',n:'Zucchini',d:'Daily harvest needed'},{i:'🫘',n:'Green beans',d:'Pick frequently'},{i:'🍓',n:'Strawberry',d:'June flush'}],t:['Water deeply 2–3x/week','Mulch 3" deep','Monitor for pests','Shade cloth for lettuce'],a:'Peak heat — cool crops need shade cloth only.'},fall:{s:[{i:'🥦',n:'Broccoli',d:'Plant mid-August'},{i:'🥬',n:'Kale',d:'Thrives after frost'},{i:'🧄',n:'Garlic',d:'Plant Oct–Nov'}],h:[{i:'🍅',n:'Tomato',d:'Second flush Oct'},{i:'🫑',n:'Pepper',d:'Harvest before frost'},{i:'🎃',n:'Pumpkin',d:'Cure for 10 days'}],t:['Plant garlic 2" deep','Clear summer beds','Install row covers','Store winter squash'],a:'First frost late November — have row covers ready.'},winter:{s:[{i:'🥬',n:'Spinach',d:'Hardy to 20°F'},{i:'🥕',n:'Carrot',d:'Sweetens after frost'},{i:'🌿',n:'Parsley',d:'Cold-tolerant'}],h:[{i:'🥬',n:'Kale',d:'Frost-sweetened'},{i:'🌿',n:'Rosemary',d:'Evergreen here'},{i:'🧄',n:'Garlic',d:'Under mulch'}],t:['Order seed catalogs','Plant bare-root trees','Cover brassicas on cold nights','Build compost pile'],a:null}}},
+  2:{lf:'Mid Feb – mid Mar',ff:'Early–mid Nov',gw:'220–270 days',s:{spring:{s:[{i:'🍅',n:'Tomato',d:'Start late Jan indoors'},{i:'🫑',n:'Pepper',d:'8–10 wks before transplant'},{i:'🍆',n:'Eggplant',d:'Start Feb'}],h:[{i:'🥬',n:'Spinach',d:'Spring sowing ready'},{i:'🥦',n:'Broccoli',d:'Transplant mid-Feb'},{i:'🥕',n:'Carrot',d:'Direct sow mid-Feb'}],t:['Start warm crops under lights','Direct sow cool crops Feb','Prune fruit trees','Add compost now'],a:null},summer:{s:[{i:'🍅',n:'Tomato',d:'Transplant out'},{i:'🌽',n:'Corn',d:'Direct sow April'},{i:'🥒',n:'Cucumber',d:'Sow late April'}],h:[{i:'🥬',n:'Lettuce',d:'Before bolting'},{i:'🥦',n:'Broccoli',d:'Spring ready'},{i:'🍓',n:'Strawberry',d:'June peak'}],t:['Stake tomatoes','Side-dress with compost','Set up soaker hoses','Watch for hornworm'],a:'Midsummer drought common — mulch and water deeply.'},fall:{s:[{i:'🥬',n:'Kale',d:'Sow direct late Aug'},{i:'🧄',n:'Garlic',d:'Plant Oct–Nov'},{i:'🌿',n:'Cilantro',d:'Cool fall thrives'}],h:[{i:'🍅',n:'Tomato',d:'Final harvest'},{i:'🎃',n:'Pumpkin',d:'Oct harvest and cure'},{i:'🧅',n:'Onion',d:'Dry and store'}],t:['Plant garlic 4–6 wks before hard frost','Cover brassicas','Harvest root crops','Mulch beds for winter'],a:null},winter:{s:[{i:'🥬',n:'Kale',d:'Survives light snow'},{i:'🌿',n:'Rosemary',d:'Evergreen here'},{i:'🧄',n:'Garlic',d:'Under mulch'}],h:[{i:'🥬',n:'Collards',d:'Frost-sweetened'},{i:'🌿',n:'Chard',d:'Protected plants'},{i:'🥕',n:'Carrot',d:'In-ground stored'}],t:['Order seed catalogs','Plant bare-root fruits','Plan crop rotation','Repair tools'],a:null}}},
+  3:{lf:'Mid Mar – mid Apr',ff:'Mid Oct – early Nov',gw:'180–220 days',s:{spring:{s:[{i:'🍅',n:'Tomato',d:'8 wks before last frost'},{i:'🫑',n:'Pepper',d:'10 wks — start Jan'},{i:'🫛',n:'Peas',d:'Direct sow Feb–Mar'}],h:[{i:'🥬',n:'Spinach',d:'First spring crop'},{i:'🫛',n:'Peas',d:'Early summer'},{i:'🥦',n:'Broccoli',d:'Spring transplants'}],t:['Start tomatoes under lights','Direct sow cold-tolerant greens March','Test soil pH','Set up trellises'],a:null},summer:{s:[{i:'🍅',n:'Tomato',d:'Transplant after last frost'},{i:'🥒',n:'Cucumber',d:'Direct sow late April'},{i:'🫘',n:'Beans',d:'Sow May–June'}],h:[{i:'🫛',n:'Peas',d:'Early summer'},{i:'🥬',n:'Lettuce',d:'Before heat bolts'},{i:'🍓',n:'Strawberry',d:'June peak'}],t:['Succession plant beans every 3 weeks','Deep water 1"/week','Thin root crops','Pinch basil flowers'],a:null},fall:{s:[{i:'🥬',n:'Kale',d:'Plant Aug for fall'},{i:'🧄',n:'Garlic',d:'Plant late Oct'},{i:'🥦',n:'Broccoli',d:'Transplant mid-August'}],h:[{i:'🎃',n:'Pumpkin',d:'Harvest Oct, cure 10 days'},{i:'🍅',n:'Tomato',d:'Pick before first frost'},{i:'🫘',n:'Dried beans',d:'Thresh after drying'}],t:['Plant garlic 6 wks before freeze','Green-manure empty beds','Harvest root crops','Mulch perennials'],a:'First frost mid-October — harvest frost-sensitive crops by Oct 10.'},winter:{s:[{i:'🥬',n:'Kale',d:'In cold frames'},{i:'🌿',n:'Parsley',d:'Under mulch'},{i:'🧄',n:'Garlic',d:'Dormant, growing roots'}],h:[{i:'🥬',n:'Kale',d:'Frost-sweetened'},{i:'🌿',n:'Parsley',d:'Protected'},{i:'🧄',n:'Garlic',d:'Emerges in spring'}],t:['Review last year','Order seeds by February','Plant bare-root trees','Build raised beds'],a:null}}},
+  4:{lf:'Mid Apr – mid May',ff:'Early–mid Oct',gw:'140–175 days',s:{spring:{s:[{i:'🍅',n:'Tomato',d:'8 wks before last frost'},{i:'🫑',n:'Pepper',d:'Start early March'},{i:'🫛',n:'Peas',d:'Sow as soil thaws'}],h:[{i:'🫛',n:'Peas',d:'June–July'},{i:'🥬',n:'Spinach',d:'Spring sowing'},{i:'🥦',n:'Broccoli',d:'Spring transplants'}],t:['Start tomatoes under lights in March','Harden off over 7–10 days','Direct sow cold crops April','Install row covers for late frosts'],a:'Last frost mid-May — protect transplants until then.'},summer:{s:[{i:'🍅',n:'Tomato',d:'Transplant after last frost'},{i:'🥒',n:'Cucumber',d:'Direct sow late May'},{i:'🫘',n:'Beans',d:'Succession sow June–July'}],h:[{i:'🫛',n:'Peas',d:'June–July harvest'},{i:'🥬',n:'Lettuce',d:'Spring sowing'},{i:'🍓',n:'Strawberry',d:'Mid-June through July'}],t:['Use short-season varieties under 70 days','Maximize succession planting','Consistent 1" water/week','Control squash vine borer in July'],a:null},fall:{s:[{i:'🥬',n:'Kale',d:'Last sowing July'},{i:'🧄',n:'Garlic',d:'Plant mid-Oct'},{i:'🥕',n:'Carrot',d:'Final sow late July'}],h:[{i:'🎃',n:'Pumpkin',d:'Harvest before Oct frost'},{i:'🥔',n:'Potato',d:'Dig after foliage dies'},{i:'🫘',n:'Beans',d:'Dry on plant'}],t:['Race to harvest by Oct 1','Plant garlic 4–6 wks before freeze','Mulch beds heavily','Dig and store root crops'],a:'Growing season ends early October — plan all crops to mature by Sep 30.'},winter:{s:[{i:'🥬',n:'Kale',d:'Under cold frames'},{i:'🧄',n:'Garlic',d:'Under mulch'},{i:'🌿',n:'Chives',d:'Frost-tolerant perennial'}],h:[{i:'🥬',n:'Kale',d:'Cold-frame harvest'},{i:'🌿',n:'Herbs',d:'Dried for winter'},{i:'🧄',n:'Garlic',d:'Dormant underground'}],t:['Order seeds — short-season focus','Plan cold frames','Compost all debris','Map rotation'],a:null}}},
+  5:{lf:'Late May – mid June',ff:'Early–mid Sep',gw:'60–140 days',s:{spring:{s:[{i:'🍅',n:'Tomato',d:'10 wks before last frost'},{i:'🥦',n:'Broccoli',d:'Start April'},{i:'🥬',n:'Kale',d:'Frost-tolerant transplant'}],h:[{i:'🫛',n:'Peas',d:'First crop'},{i:'🥬',n:'Spinach',d:'Early spring'},{i:'🥕',n:'Carrot',d:'Under fleece'}],t:['Start everything indoors in March','Use cold frames to harden off','Direct sow frost-tolerant crops May','Cover beds with black plastic to warm soil'],a:'Last frost late May–June — never skip hardening off.'},summer:{s:[{i:'🥒',n:'Cucumber',d:'Under plastic mulch'},{i:'🫘',n:'Beans',d:'Direct sow June'},{i:'🌽',n:'Corn',d:'Short-season only (65d)'}],h:[{i:'🫛',n:'Peas',d:'July harvest window'},{i:'🥬',n:'Lettuce',d:'Spring plantings'},{i:'🍓',n:'Strawberry',d:'Late July peak'}],t:['Maximize every day — season is short','Use hoops and fleece for warmth','Succession plant fast crops','Watch forecasts daily'],a:'Summer is brief — prioritize plants under 80 days to maturity.'},fall:{s:[{i:'🧄',n:'Garlic',d:'Plant before freeze (Sep)'},{i:'🥬',n:'Kale',d:'Hardy for Sep–Oct'},{i:'🌿',n:'Chives',d:'Perennial — plant now'}],h:[{i:'🥔',n:'Potato',d:'Dig before freeze'},{i:'🫘',n:'Beans',d:'Dry harvest before frost'},{i:'🥕',n:'Carrot',d:'Sweeter after light frost'}],t:['Harvest everything before frost (Sep)','Plant garlic in September','Compost all organic matter','Mulch beds 4–6" for insulation'],a:'First frost arrives early September — be ready to harvest quickly.'},winter:{s:[{i:'🌿',n:'Sprouts',d:'Grow indoors year-round'},{i:'🥬',n:'Microgreens',d:'Countertop growing'},{i:'🌱',n:'Herbs',d:'Windowsill pots'}],h:[{i:'🧄',n:'Garlic',d:'Dormant under mulch'},{i:'🥔',n:'Stored potato',d:'From fall harvest'},{i:'🎃',n:'Squash',d:'Cured in storage'}],t:['Order from cold-climate specialists','Research season extension','Plan cold frame or hoop house','Start seed germination test'],a:null}}}
+};
+const SICONS={spring:'🌸',summer:'☀️',fall:'🍂',winter:'❄️'};
+const SNAMES=['spring','summer','fall','winter'];
+
+function renderSeasonal(plants) {
+  const zl = Math.min(Math.round(zlat(S.zone||'5b-6b')),5);
+  const zd = ZS[zl]||ZS[3];
+  const cs = curSeason(new Date().getMonth()+1);
+  document.getElementById('frost-strip').innerHTML=`
+    <div class="frost-card"><div class="frost-icon">❄️</div><div class="frost-lbl">Last spring frost</div><div class="frost-val">${zd.lf}</div></div>
+    <div class="frost-card"><div class="frost-icon">🍂</div><div class="frost-lbl">First fall frost</div><div class="frost-val">${zd.ff}</div></div>
+    <div class="frost-card"><div class="frost-icon">🌱</div><div class="frost-lbl">Growing window</div><div class="frost-val">${zd.gw}</div></div>
+    <div class="frost-card"><div class="frost-icon">📅</div><div class="frost-lbl">Current season</div><div class="frost-val">${cs.toUpperCase()}</div></div>`;
+  const tabs = document.getElementById('stabs');
+  tabs.innerHTML = SNAMES.map(s=>`<button class="stab${s===cs?' now':''}" data-s="${s}" onclick="showStab('${s}')">${SICONS[s]} ${s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('');
+  window._zsd = zd;
+  showStab(cs);
+}
+
+function showStab(season) {
+  document.querySelectorAll('.stab').forEach(t=>t.classList.remove('on'));
+  const t=document.querySelector(`.stab[data-s="${season}"]`); if(t)t.classList.add('on');
+  const sd=window._zsd?.s?.[season]; if(!sd)return;
+  const c1=season==='spring'?'Sow indoors':season==='summer'?'Plant out now':season==='fall'?'Plant before frost':'Grow under cover';
+  const c2=season==='spring'?'First harvests':season==='summer'?'Harvesting now':season==='fall'?'Harvest & store':'Order & plan';
+  document.getElementById('sbody').innerHTML=`
+    <div class="season-cols">
+      <div><div class="scol-title">${c1}</div>${sd.s.map(p=>`<div class="spr"><span class="spr-i">${p.i}</span><div><div class="spr-n">${p.n}</div><div class="spr-d">${p.d}</div></div></div>`).join('')}</div>
+      <div><div class="scol-title">${c2}</div>${sd.h.map(p=>`<div class="spr"><span class="spr-i">${p.i}</span><div><div class="spr-n">${p.n}</div><div class="spr-d">${p.d}</div></div></div>`).join('')}</div>
+    </div>
+    <div style="margin-top:0.65rem"><div class="scol-title">Key tasks</div><ul class="season-tasks">${sd.t.map(t=>`<li>${t}</li>`).join('')}</ul></div>
+    <div class="season-alert${sd.a?' show':''}">${sd.a?'⚠ '+sd.a:''}</div>`;
+}
+
+function renderMonthly(plants) {
+  const today = new Date().getMonth();
+  const bar = document.getElementById('mpills');
+  bar.innerHTML = MS.map((m,i)=>`<div class="mpill${i===today?' today':''}" onclick="selMonth(${i+1},this)">${m}</div>`).join('');
+  window._mplants = plants;
+  selMonth(today+1, bar.children[today]);
+}
+
+function selMonth(mo, el) {
+  document.querySelectorAll('.mpill').forEach(p=>p.classList.remove('on')); if(el)el.classList.add('on');
+  const plants = window._mplants||[];
+  const sow = plants.filter(p=>p.sow.includes(mo));
+  const harv = plants.filter(p=>p.harvest.includes(mo));
+  const grow = plants.filter(p=>p.grow.includes(mo)&&!p.sow.includes(mo)&&!p.harvest.includes(mo));
+  const rh=(arr,u)=>arr.length?arr.map(p=>`<div class="maction"><div class="urg ${u}"></div><span>${p.icon}</span><span><b>${p.name}</b></span></div>`).join(''):`<div style="font-size:0.58rem;color:var(--sage-dim);padding:.25rem 0">Nothing this month</div>`;
+  document.getElementById('mdcols').innerHTML=`
+    <div class="mdc"><h4>🌱 ${MN[mo-1]} — Sow & Plant</h4>${rh(sow,'uh')}</div>
+    <div class="mdc"><h4>🌿 Maintain & Harvest</h4>${rh([...grow,...harv],'um')}</div>`;
+}
+
+function renderTips() {
+  const zl = Math.min(Math.round(zlat(S.zone||'5b-6b')),5);
+  const all={0:['🌧 Manage water during tropical rains — raised beds prevent root rot.','☀️ Shade cloth in July–August protects leafy greens from heat stress.','🐛 Tropical pests are active year-round — companion planting and neem oil help.','🌱 Plant fast-cycling crops in 90-day rotations for maximum yield.','🌀 Hurricane season (June–Nov) — secure tall crops and harvest early if a storm approaches.'],1:['🌡 Extend the season with shade cloth in peak summer.','🌧 Drip irrigation prevents fungal issues in humid subtropical climates.','🌿 Plant winter greens in October for fresh harvests Dec–Feb.','🐛 Monitor for citrus leafminer and aphids in warm winters.','🌱 Succession plant tomatoes every 3 weeks for continuous harvest.'],2:['❄️ Light frosts possible Oct–Mar — row covers protect tender crops.','🌱 Start seeds indoors 6–8 weeks before last frost (mid-Feb).','🌿 Fall is ideal for brassicas — plant kale and spinach late August.','💧 Mulch heavily to retain moisture through hot summers.','🍅 Tomatoes thrive here — stagger plantings for harvests June–October.'],3:['🌱 Start tomatoes indoors 6–8 weeks before last frost.','🌿 Plant garlic in October — harvest the following July.','❄️ Use cold frames to extend harvest into November.','💧 Drip irrigation and deep mulching conserves water.','🔄 Rotate crops: brassicas → roots → legumes → alliums.'],4:['❄️ Last frost: mid-April. Start seeds indoors from late February.','🌱 Focus on short-season varieties under 70 days.','🌿 Kale, chard, and spinach handle light frosts well.','🛖 Cold frames and hoop houses add 3–4 weeks to your season.','💧 Water deeply but infrequently — encourages deep root growth.'],5:['🧊 Growing season is short — choose fast-maturing varieties.','🏗 Row covers or low tunnels are essential to extend the season.','🥔 Root crops like potatoes, turnips, and carrots store well here.','🌱 Direct sow after last frost (late May–June). Start transplants in April.','🌿 Hardy perennials like rhubarb, horseradish, and chives are great investments.']};
+  document.getElementById('tips-list').innerHTML=(all[zl]||all[3]).map(t=>`<li><span>${t.slice(0,2)}</span><span>${t.slice(2)}</span></li>`).join('');
+}
+
+// ════════════════════════════════════════════════════════════
+// RESULT TABS
+// ════════════════════════════════════════════════════════════
+function rTab(t) {
+  document.querySelectorAll('.rtab').forEach(r=>r.classList.remove('on'));
+  document.querySelectorAll('.rtp').forEach(p=>p.classList.remove('on'));
+  document.querySelector(`.rtab[onclick*="${t}"]`).classList.add('on');
+  document.getElementById('rtp-'+t).classList.add('on');
+}
+
+// ════════════════════════════════════════════════════════════
+// AI NARRATIVE
+// ════════════════════════════════════════════════════════════
+async function getAI(plants) {
+  const top = plants.slice(0,5).map(p=>p.name).join(', ');
+  const sqft = S.w * S.l;
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:`You are a regenerative farmer. Write a warm, expert 2-sentence growing summary (no bullets, no headers):
+Location: ${S.location} (Zone ${S.zone}) · Space: ${sqft}sqft ${S.stype} ${S.sun} sun ${S.sq} soil · Goals: ${S.goals.join(', ')} · ${S.people} people (${S.diet}) · ${S.suf}% self-sufficiency · Top plants: ${top} · Experience: ${S.exp}
+Be specific, mention zone label, 2 plants, give one actionable first step.`}]})});
+    const d = await r.json();
+    const text = d.content?.map(b=>b.text||'').join('');
+    if (text) { const el=document.getElementById('ai-strip'); el.textContent=text; el.classList.add('show'); }
+  } catch(e){}
+}
+
+// ════════════════════════════════════════════════════════════
+// PLANT MODAL
+// ════════════════════════════════════════════════════════════
+function showModal(p) {
+  document.getElementById('mc').innerHTML=`
+    <div class="modal-icon">${p.icon}</div>
+    <div class="modal-name">${p.name}</div>
+    <div class="modal-latin">${p.latin}</div>
+    <div style="display:flex;gap:.28rem;flex-wrap:wrap;margin:.6rem 0">
+      ${p.tags.map(t=>`<span class="pr-tag tag-green">${t}</span>`).join('')}
+      <span class="pr-tag tag-amber">${p.days} days</span>
+    </div>
+    <div class="modal-grid">
+      <div class="mgi"><div class="mgi-l">Expected yield</div><div class="mgi-v">${p.yield}</div></div>
+      <div class="mgi"><div class="mgi-l">Calories/100g</div><div class="mgi-v">${p.cal||'—'}</div></div>
+      <div class="mgi"><div class="mgi-l">Plant type</div><div class="mgi-v">${p.type}</div></div>
+      <div class="mgi"><div class="mgi-l">Difficulty</div><div class="mgi-v">${p.diff}</div></div>
+    </div>
+    <div class="modal-timing">
+      <b>Sow:</b> ${p.sow.map(i=>MS[i-1]).join(', ')}<br>
+      <b>Harvest:</b> ${p.harvest.map(i=>MS[i-1]).join(', ')}<br>
+      <b>Growing:</b> ${p.grow.map(i=>MS[i-1]).join(', ')}
+    </div>`;
+  document.getElementById('mbg').classList.add('open');
+}
+function closeModal(){document.getElementById('mbg').classList.remove('open');}
+
+// ════════════════════════════════════════════════════════════
+// UTILS
+// ════════════════════════════════════════════════════════════
+function showL(m){document.getElementById('loader-msg').textContent=m;document.getElementById('loader').classList.add('on');}
+function hideL(){document.getElementById('loader').classList.remove('on');}
+document.getElementById('loc-in').addEventListener('keydown',e=>{if(e.key==='Enter')locate();});
+window.addEventListener('load',()=>initCesium());
+</script>
+</body>
+</html>
