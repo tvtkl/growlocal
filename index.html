@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@300;400;500&family=Lora:ital,wght@0,600;0,700;1,500&display=swap" rel="stylesheet">
 <script src="https://ajax.googleapis.com/ajax/libs/cesiumjs/1.105/Build/Cesium/Cesium.js"></script>
 <link href="https://ajax.googleapis.com/ajax/libs/cesiumjs/1.105/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
 <style>
 /* ═══════════════════════════════════════
    WHATCANWEGROW — Warm Modern Natural
@@ -1000,12 +1001,87 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
         </div>
       </div>
 
+      <!-- SOLAR INTELLIGENCE PANEL -->
       <div class="form-block">
-        <div class="field-label">Sunlight</div>
-        <div class="chip-grid">
-          <div class="sun-chip on" onclick="selSun('full',this)"><div class="si">☀️</div><div class="sl">Full Sun</div><div class="ss">6+ hrs</div></div>
-          <div class="sun-chip" onclick="selSun('partial',this)"><div class="si">⛅</div><div class="sl">Partial</div><div class="ss">3–6 hrs</div></div>
-          <div class="sun-chip" onclick="selSun('shade',this)"><div class="si">🌥</div><div class="sl">Shade</div><div class="ss">&lt;3 hrs</div></div>
+        <div class="field-label">Garden facing direction</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.35rem;margin-top:0.25rem">
+          <div class="sun-chip on" onclick="selAspect('S',this)" title="Best for sun"><div class="si">⬇️</div><div class="sl">South</div></div>
+          <div class="sun-chip" onclick="selAspect('N',this)"><div class="si">⬆️</div><div class="sl">North</div></div>
+          <div class="sun-chip" onclick="selAspect('E',this)"><div class="si">➡️</div><div class="sl">East</div></div>
+          <div class="sun-chip" onclick="selAspect('W',this)"><div class="si">⬅️</div><div class="sl">West</div></div>
+        </div>
+        <div style="font-size:0.58rem;color:var(--sage-dim);margin-top:0.35rem">Which direction does your garden face? South-facing gets the most sun in the northern hemisphere.</div>
+      </div>
+
+      <div class="form-block">
+        <div class="field-label">Obstructions <span style="font-weight:400;color:var(--sage-dim);">(select all that apply)</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.35rem;margin-top:0.25rem">
+          <div class="sun-chip" id="obs-trees" onclick="toggleObs('trees',this)"><div class="si">🌳</div><div class="sl">Tall trees</div></div>
+          <div class="sun-chip" id="obs-buildings" onclick="toggleObs('buildings',this)"><div class="si">🏢</div><div class="sl">Buildings</div></div>
+          <div class="sun-chip" id="obs-fence" onclick="toggleObs('fence',this)"><div class="si">🪵</div><div class="sl">Fence/wall</div></div>
+        </div>
+      </div>
+
+      <!-- Live solar data card — populated by SunCalc + Open-Meteo -->
+      <div id="solar-card" style="display:none;margin:0 1rem 0.75rem;border:1.5px solid var(--border2);border-radius:var(--r-lg);overflow:hidden">
+        <div style="background:linear-gradient(135deg,#4A7C3F,#7A9E6A);padding:0.75rem 1rem;display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div style="font-size:0.58rem;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.65)">Solar Analysis — Live Data</div>
+            <div style="font-family:'Lora',serif;font-size:1rem;color:#fff;margin-top:0.1rem" id="solar-headline">Calculating…</div>
+          </div>
+          <div style="font-size:1.6rem" id="solar-icon">☀️</div>
+        </div>
+
+        <!-- Monthly sun hours bar chart -->
+        <div style="padding:0.75rem 1rem;background:var(--cream2);border-bottom:1px solid var(--border)">
+          <div style="font-size:0.6rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--stone2);margin-bottom:0.5rem">Daylight hours per month</div>
+          <div id="sun-bar-chart" style="display:flex;align-items:flex-end;gap:3px;height:48px"></div>
+          <div style="display:flex;justify-content:space-between;margin-top:0.3rem">
+            <span style="font-size:0.52rem;color:var(--stone2)">Jan</span>
+            <span style="font-size:0.52rem;color:var(--stone2)">Jun</span>
+            <span style="font-size:0.52rem;color:var(--stone2)">Dec</span>
+          </div>
+        </div>
+
+        <!-- Sun path arc for today -->
+        <div style="padding:0.75rem 1rem;background:var(--cream2);border-bottom:1px solid var(--border)">
+          <div style="font-size:0.6rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--stone2);margin-bottom:0.5rem">Sun path today <span id="sun-path-date" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+          <svg id="sun-arc-svg" viewBox="0 0 240 90" style="width:100%;height:auto">
+            <!-- Horizon line -->
+            <line x1="10" y1="80" x2="230" y2="80" stroke="var(--stone)" stroke-width="1" stroke-dasharray="3,3"/>
+            <!-- Direction labels -->
+            <text x="12" y="88" font-size="7" fill="var(--stone2)" font-family="Inter,sans-serif">E</text>
+            <text x="226" y="88" font-size="7" fill="var(--stone2)" font-family="Inter,sans-serif">W</text>
+            <text x="117" y="88" font-size="7" fill="var(--stone2)" font-family="Inter,sans-serif">S</text>
+            <!-- Sun arc path -->
+            <path id="sun-arc-path" d="" fill="none" stroke="var(--wheat)" stroke-width="1.5" opacity="0.6"/>
+            <!-- Current sun position dot -->
+            <circle id="sun-dot" cx="120" cy="80" r="5" fill="var(--wheat)" opacity="0"/>
+            <!-- Sunrise/sunset markers -->
+            <circle id="arc-rise" cx="0" cy="80" r="3" fill="var(--moss2)" opacity="0"/>
+            <circle id="arc-set" cx="240" cy="80" r="3" fill="var(--terracotta)" opacity="0"/>
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:0.6rem;color:var(--stone2)">
+            <span>🌅 <span id="sunrise-time">—</span></span>
+            <span id="daylight-hours" style="color:var(--moss);font-weight:600">— hrs daylight</span>
+            <span>🌇 <span id="sunset-time">—</span></span>
+          </div>
+        </div>
+
+        <!-- Key stats row -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);background:var(--ink2)">
+          <div style="padding:0.6rem;text-align:center;border-right:1px solid rgba(255,255,255,0.07)">
+            <div style="font-size:0.78rem;color:var(--fern2);font-weight:600" id="sc-peak">—</div>
+            <div style="font-size:0.52rem;color:rgba(200,220,180,0.5);margin-top:0.1rem;text-transform:uppercase;letter-spacing:0.05em">Peak sun hrs/day</div>
+          </div>
+          <div style="padding:0.6rem;text-align:center;border-right:1px solid rgba(255,255,255,0.07)">
+            <div style="font-size:0.78rem;color:var(--fern2);font-weight:600" id="sc-aspect">—</div>
+            <div style="font-size:0.52rem;color:rgba(200,220,180,0.5);margin-top:0.1rem;text-transform:uppercase;letter-spacing:0.05em">Facing adjustment</div>
+          </div>
+          <div style="padding:0.6rem;text-align:center">
+            <div style="font-size:0.78rem;color:var(--fern2);font-weight:600" id="sc-class">—</div>
+            <div style="font-size:0.52rem;color:rgba(200,220,180,0.5);margin-top:0.1rem;text-transform:uppercase;letter-spacing:0.05em">Classification</div>
+          </div>
         </div>
       </div>
 
@@ -1132,6 +1208,11 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
           <div class="rst"><div class="rst-v" id="r-plants">—</div><div class="rst-l">Plants</div></div>
           <div class="rst"><div class="rst-v" id="r-sqft">—</div><div class="rst-l">Sq ft</div></div>
           <div class="rst"><div class="rst-v" id="r-yield">—</div><div class="rst-l">Est lbs/yr</div></div>
+        </div>
+        <div id="res-solar-row" style="display:none;margin-top:0.65rem;padding-top:0.65rem;border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(3,1fr);gap:0.4rem">
+          <div class="rst"><div class="rst-v" id="rs-sunhrs">—</div><div class="rst-l">Sun hrs/day</div></div>
+          <div class="rst"><div class="rst-v" id="rs-aspect">—</div><div class="rst-l">Facing</div></div>
+          <div class="rst"><div class="rst-v" id="rs-sunclass">—</div><div class="rst-l">Sun class</div></div>
         </div>
       </div>
       <div class="ai-strip" id="ai-strip"></div>
@@ -1498,6 +1579,16 @@ function renderAll(plants) {
   const ey = Math.round(plants.slice(0,6).reduce((a,p)=>a+(parseFloat(p.yield.split('–')[1])||5)*4,0));
   document.getElementById('r-yield').textContent = ey.toLocaleString();
 
+  // Populate solar summary row if we have data
+  if (S.solarData) {
+    const effectiveHrs = document.getElementById('sc-peak')?.textContent || '—';
+    const sunClass = { full:'Full sun ☀️', partial:'Partial ⛅', shade:'Shade 🌥' }[S.sun] || '—';
+    document.getElementById('rs-sunhrs').textContent = effectiveHrs;
+    document.getElementById('rs-aspect').textContent = S.aspect + '-facing';
+    document.getElementById('rs-sunclass').textContent = sunClass;
+    document.getElementById('res-solar-row').style.display = 'grid';
+  }
+
   // Plant rows (WorldView "data layer" style)
   const rows = document.getElementById('plant-rows');
   rows.innerHTML = '';
@@ -1678,6 +1769,201 @@ function showL(m){document.getElementById('loader-msg').textContent=m;document.g
 function hideL(){document.getElementById('loader').classList.remove('on');}
 document.getElementById('loc-in').addEventListener('keydown',e=>{if(e.key==='Enter')locate();});
 window.addEventListener('load',()=>initCesium());
+
+// ══════════════════════════════════════════════════════════════
+// SOLAR INTELLIGENCE ENGINE
+// ══════════════════════════════════════════════════════════════
+
+S.aspect = 'S'; // default south-facing
+S.obstructions = [];
+S.solarData = null; // will hold computed solar profile
+
+function selAspect(dir, el) {
+  S.aspect = dir;
+  document.querySelectorAll('.sun-chip[onclick*="selAspect"]').forEach(e => e.classList.remove('on'));
+  el.classList.add('on');
+  if (S.solarData) applyAspectAndObstructions();
+}
+
+function toggleObs(type, el) {
+  el.classList.toggle('on');
+  if (S.obstructions.includes(type)) S.obstructions = S.obstructions.filter(x => x !== type);
+  else S.obstructions.push(type);
+  if (S.solarData) applyAspectAndObstructions();
+}
+
+// Called after location is detected — runs full solar analysis
+async function runSolarAnalysis(lat, lng) {
+  if (!window.SunCalc) return;
+
+  // 1. Calculate daylight hours for each month using SunCalc
+  const monthlyDaylight = [];
+  const year = new Date().getFullYear();
+  for (let m = 0; m < 12; m++) {
+    const mid = new Date(year, m, 15, 12, 0, 0); // 15th of each month
+    const times = SunCalc.getTimes(mid, lat, lng);
+    const rise = times.sunrise;
+    const set = times.sunset;
+    let hrs = 0;
+    if (rise && set && !isNaN(rise) && !isNaN(set)) {
+      hrs = (set - rise) / 3600000;
+    }
+    monthlyDaylight.push(Math.max(0, Math.round(hrs * 10) / 10));
+  }
+
+  // 2. Today's sun times
+  const today = new Date();
+  const todayTimes = SunCalc.getTimes(today, lat, lng);
+  const rise = todayTimes.sunrise;
+  const set = todayTimes.sunset;
+  const daylightHrs = rise && set && !isNaN(rise) && !isNaN(set)
+    ? Math.round((set - rise) / 360000) / 10 : 0;
+
+  // 3. Sun arc points for today (every 30 min)
+  const arcPoints = [];
+  if (rise && !isNaN(rise)) {
+    const startT = new Date(rise); startT.setMinutes(0,0,0);
+    const endT = new Date(set || rise); endT.setHours(endT.getHours() + 1);
+    for (let t = new Date(startT); t <= endT; t.setMinutes(t.getMinutes() + 30)) {
+      const pos = SunCalc.getPosition(t, lat, lng);
+      arcPoints.push({
+        time: new Date(t),
+        alt: pos.altitude * 180 / Math.PI, // degrees above horizon
+        az: (pos.azimuth * 180 / Math.PI + 180) % 360 // 0=N, 90=E, 180=S, 270=W
+      });
+    }
+  }
+
+  // 4. Current sun position
+  const nowPos = SunCalc.getPosition(today, lat, lng);
+  const sunAltNow = nowPos.altitude * 180 / Math.PI;
+  const sunAzNow = (nowPos.azimuth * 180 / Math.PI + 180) % 360;
+
+  // 5. Peak gardening sun hours (April–September average for N hemisphere, or Oct–Mar for S)
+  const isSouthern = lat < 0;
+  const summerMonths = isSouthern ? [9,10,11,0,1,2] : [3,4,5,6,7,8];
+  const peakHrs = Math.round(
+    summerMonths.reduce((a,i) => a + monthlyDaylight[i], 0) / summerMonths.length * 10
+  ) / 10;
+
+  // Store in state
+  S.solarData = { monthlyDaylight, daylightHrs, arcPoints, sunAltNow, sunAzNow, peakHrs, rise, set, lat };
+
+  applyAspectAndObstructions();
+  renderSunArc(arcPoints, sunAltNow, sunAzNow, rise, set);
+  renderMonthlyBars(monthlyDaylight, lat);
+
+  // Format times
+  const fmt = d => d && !isNaN(d) ? d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—';
+  document.getElementById('sunrise-time').textContent = fmt(rise);
+  document.getElementById('sunset-time').textContent = fmt(set);
+  document.getElementById('daylight-hours').textContent = daylightHrs + ' hrs daylight';
+  document.getElementById('sun-path-date').textContent = today.toLocaleDateString([], {month:'short',day:'numeric'});
+
+  document.getElementById('solar-card').style.display = 'block';
+}
+
+function applyAspectAndObstructions() {
+  const d = S.solarData; if (!d) return;
+  let peakHrs = d.peakHrs;
+
+  // Aspect penalty/bonus (vs south-facing baseline)
+  const aspectFactors = { S:1.0, SW:0.95, SE:0.95, W:0.75, E:0.75, N:0.35, NE:0.4, NW:0.4 };
+  const factor = aspectFactors[S.aspect] || 1.0;
+
+  // Obstruction penalties
+  let obsFactor = 1.0;
+  if (S.obstructions.includes('trees')) obsFactor -= 0.25;
+  if (S.obstructions.includes('buildings')) obsFactor -= 0.3;
+  if (S.obstructions.includes('fence')) obsFactor -= 0.1;
+  obsFactor = Math.max(0.2, obsFactor);
+
+  const effectiveHrs = Math.round(peakHrs * factor * obsFactor * 10) / 10;
+  S.sun = effectiveHrs >= 6 ? 'full' : effectiveHrs >= 3 ? 'partial' : 'shade';
+
+  const aspectPct = Math.round(factor * obsFactor * 100);
+  const classLabels = { full:'Full sun ☀️', partial:'Partial sun ⛅', shade:'Mostly shade 🌥' };
+  const aspectLabels = { S:'South (best)', N:'North (least)', E:'East (morning)', W:'West (afternoon)', SW:'South-west', SE:'South-east', NW:'North-west', NE:'North-east' };
+
+  document.getElementById('sc-peak').textContent = effectiveHrs + ' hrs';
+  document.getElementById('sc-aspect').textContent = aspectPct + '% of max';
+  document.getElementById('sc-class').textContent = classLabels[S.sun];
+
+  const headlines = {
+    full: `${effectiveHrs} hrs effective sun — excellent for most crops`,
+    partial: `${effectiveHrs} hrs effective sun — good for many vegetables`,
+    shade: `${effectiveHrs} hrs effective sun — focus on shade-tolerant crops`
+  };
+  const icons = { full:'☀️', partial:'⛅', shade:'🌥' };
+  document.getElementById('solar-headline').textContent = headlines[S.sun];
+  document.getElementById('solar-icon').textContent = icons[S.sun];
+}
+
+function renderMonthlyBars(monthlyDaylight, lat) {
+  const chart = document.getElementById('sun-bar-chart');
+  chart.innerHTML = '';
+  const max = Math.max(...monthlyDaylight);
+  const isSouthern = lat < 0;
+  const summerMonths = isSouthern ? [11,0,1] : [5,6,7];
+  monthlyDaylight.forEach((hrs, i) => {
+    const bar = document.createElement('div');
+    const pct = max > 0 ? (hrs / max) * 100 : 0;
+    const isSummer = summerMonths.includes(i);
+    bar.style.cssText = `flex:1;height:${Math.round(pct)}%;background:${isSummer?'var(--wheat)':'var(--moss2)'};border-radius:2px 2px 0 0;opacity:0.85;cursor:default;transition:opacity .15s;min-height:2px`;
+    bar.title = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i] + ': ' + hrs + ' hrs';
+    chart.appendChild(bar);
+  });
+}
+
+function renderSunArc(arcPoints, sunAltNow, sunAzNow, rise, set) {
+  const svg = document.getElementById('sun-arc-svg');
+  const W = 240, H = 90, pad = 20;
+  const plotW = W - pad * 2, plotH = H - 20;
+
+  if (!arcPoints.length) return;
+
+  // Map azimuth (0-360) to x, altitude to y
+  const azToX = az => pad + ((az / 360) * plotW);
+  const altToY = alt => (H - 12) - Math.max(0, Math.min(alt, 80)) / 80 * plotH;
+
+  // Build SVG path
+  let d = '';
+  arcPoints.filter(p => p.alt >= -2).forEach((p, i) => {
+    const x = azToX(p.az);
+    const y = altToY(p.alt);
+    d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
+  });
+
+  const pathEl = document.getElementById('sun-arc-path');
+  if (pathEl) pathEl.setAttribute('d', d);
+
+  // Current sun dot
+  const dot = document.getElementById('sun-dot');
+  if (dot && sunAltNow > 0) {
+    dot.setAttribute('cx', azToX(sunAzNow).toFixed(1));
+    dot.setAttribute('cy', altToY(sunAltNow).toFixed(1));
+    dot.setAttribute('opacity', '1');
+  }
+
+  // Sunrise / sunset markers
+  if (arcPoints.length) {
+    const riseP = arcPoints[0];
+    const setP = arcPoints[arcPoints.length - 1];
+    const riseEl = document.getElementById('arc-rise');
+    const setEl = document.getElementById('arc-set');
+    if (riseEl) { riseEl.setAttribute('cx', azToX(riseP.az)); riseEl.setAttribute('cy', H-12); riseEl.setAttribute('opacity','1'); }
+    if (setEl) { setEl.setAttribute('cx', azToX(setP.az)); setEl.setAttribute('cy', H-12); setEl.setAttribute('opacity','1'); }
+  }
+}
+
+// Hook into locate() to trigger solar analysis after location found
+const _origLocate = locate;
+locate = async function() {
+  await _origLocate();
+  if (S.lat && S.lng && window.SunCalc) {
+    runSolarAnalysis(S.lat, S.lng);
+  }
+};
 </script>
 </body>
 </html>
