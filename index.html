@@ -1517,6 +1517,7 @@ function go(n) {
 // ── API KEYS ── loaded securely from /api/keys at runtime
 let GOOGLE_MAPS_KEY = '';
 let CESIUM_TOKEN = '';
+let MAPBOX_TOKEN = '';
 
 async function loadKeys() {
   try {
@@ -1524,6 +1525,7 @@ async function loadKeys() {
     const d = await r.json();
     GOOGLE_MAPS_KEY = d.googleMapsKey || '';
     CESIUM_TOKEN = d.cesiumToken || '';
+    MAPBOX_TOKEN = d.mapboxToken || '';
   } catch(e) {
     console.log('Could not load API keys — map will use fallback imagery');
   }
@@ -2167,10 +2169,25 @@ function onLocInput(val) {
 
 async function fetchSuggestions(q) {
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&addressdetails=1`);
-    const d = await r.json();
-    _acResults = d;
-    renderDropdown(d);
+    let results = [];
+    if (MAPBOX_TOKEN) {
+      // Mapbox Geocoding — street-level address accuracy globally
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=6&types=address,place,postcode,neighborhood,locality`;
+      const r = await fetch(url);
+      const d = await r.json();
+      results = (d.features || []).map(f => ({
+        display_name: f.place_name,
+        lat: f.center[1],
+        lon: f.center[0],
+        _mapbox: true
+      }));
+    } else {
+      // Fallback to Nominatim if no Mapbox token
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&addressdetails=1`);
+      results = await r.json();
+    }
+    _acResults = results;
+    renderDropdown(results);
   } catch(e) { closeDropdown(); }
 }
 
@@ -2178,19 +2195,17 @@ function renderDropdown(results) {
   const dd = document.getElementById('loc-dropdown');
   if (!results || !results.length) { closeDropdown(); return; }
   dd.innerHTML = results.map((r, i) => {
-    const parts = r.display_name.split(',');
-    const primary = parts.slice(0, 2).join(', ');
+    const fullName = r.display_name || r.place_name || '';
+    const parts = fullName.split(',');
+    const primary = parts.slice(0, 2).join(', ').trim();
     const secondary = parts.slice(2, 5).join(', ').trim();
     return `<div
-      role="option"
-      tabindex="0"
+      role="option" tabindex="0"
       onclick="pickSuggestion(${i})"
       onkeydown="if(event.key==='Enter')pickSuggestion(${i})"
       style="padding:0.65rem 1rem;cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s;outline:none"
       onmouseover="this.style.background='#F5F2EA'"
-      onmouseout="this.style.background='#fff'"
-      onfocus="this.style.background='#F5F2EA'"
-      onblur="this.style.background='#fff'">
+      onmouseout="this.style.background='#fff'">
       <div style="font-size:0.82rem;font-weight:600;color:var(--bark)">${primary}</div>
       ${secondary ? `<div style="font-size:0.63rem;color:var(--sage);margin-top:0.1rem">${secondary}</div>` : ''}
     </div>`;
@@ -2201,13 +2216,15 @@ function renderDropdown(results) {
 function pickSuggestion(i) {
   const r = _acResults[i];
   if (!r) return;
-  const displayVal = r.display_name.split(',').slice(0, 3).join(', ');
-  document.getElementById('loc-in').value = displayVal;
+  // Handle both Mapbox and Nominatim formats
+  const lat = parseFloat(r.lat || r.geometry?.coordinates[1]);
+  const lng = parseFloat(r.lon || r.geometry?.coordinates[0]);
+  const displayVal = r.display_name || r.place_name || '';
+  document.getElementById('loc-in').value = displayVal.split(',').slice(0, 3).join(', ');
   closeDropdown();
-  // Use result directly — no extra fetch needed
-  S.lat = parseFloat(r.lat);
-  S.lng = parseFloat(r.lon);
-  S.location = r.display_name.split(',').slice(0, 3).join(',').trim();
+  S.lat = lat;
+  S.lng = lng;
+  S.location = displayVal.split(',').slice(0, 3).join(',').trim();
   const zd = zoneFor(S.lat); S.zone = zd.zone; S.zd = zd;
   document.getElementById('cc-name').textContent = 'Zone ' + zd.zone + ' — ' + zd.label;
   document.getElementById('cc-desc').textContent = zd.description;
@@ -2220,7 +2237,7 @@ function pickSuggestion(i) {
   try { document.getElementById('h-season').textContent = curSeason(new Date().getMonth()+1).toUpperCase(); } catch(e){}
   try { document.getElementById('bt-status').textContent = S.location + ' · Zone ' + zd.zone; } catch(e){}
   try { initCesium(); } catch(e) {}
-  flyTo(S.lat, S.lng, 450);
+  flyTo(S.lat, S.lng, 350);
   if (window.SunCalc) runSolarAnalysis(S.lat, S.lng);
 }
 
