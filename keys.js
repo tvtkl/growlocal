@@ -1,30 +1,19 @@
-export const config = { runtime: 'edge' };
-
-export default async function handler(req) {
-  const origin = req.headers.get('origin') || '';
+module.exports = (req, res) => {
+  const origin = req.headers.origin || '';
   const allowed = ['https://whatcanwegrow.com', 'https://www.whatcanwegrow.com'];
-  const isAllowed = allowed.includes(origin) || origin.includes('vercel.app') || origin.includes('localhost');
+  const isAllowed = allowed.some(o => origin === o) || origin.includes('vercel.app') || origin.includes('localhost');
 
   if (!isAllowed) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 403,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return res.status(403).json({ error: 'Unauthorized' });
   }
 
-  return new Response(
-    JSON.stringify({
-      googleMapsKey: process.env.GOOGLE_MAPS_KEY || '',
-      cesiumToken: process.env.CESIUM_TOKEN || '',
-      mapboxToken: process.env.MAPBOX_TOKEN || ''
-    }),
-    {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': origin,
-        'Cache-Control': 'no-store'
-      }
-    }
-  );
-}
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json');
+
+  return res.status(200).json({
+    googleMapsKey: process.env.GOOGLE_MAPS_KEY || '',
+    cesiumToken: process.env.CESIUM_TOKEN || '',
+    mapboxToken: process.env.MAPBOX_TOKEN || ''
+  });
+};

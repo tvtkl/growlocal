@@ -1556,7 +1556,12 @@ function initCesium() {
 }
 
 function loadFallback() {
-  try { S.viewer && S.viewer.imageryLayers.addImageryProvider(new Cesium.IonImageryProvider({assetId:3})); } catch(e){}
+  try {
+    if (S.viewer) {
+      const provider = await Cesium.IonImageryProvider.fromAssetId(3);
+      S.viewer.imageryLayers.addImageryProvider(provider);
+    }
+  } catch(e){}
 }
 
 function flyTo(lat, lng, alt) {
@@ -2154,6 +2159,13 @@ document.addEventListener('click', e => {
 
 window.addEventListener('load', async () => {
   await loadKeys();
+  // Update placeholder to confirm which geocoder is active
+  const inp = document.getElementById('loc-in');
+  if (inp) {
+    inp.placeholder = MAPBOX_TOKEN
+      ? 'Start typing your street address…'
+      : 'Start typing your town or city…';
+  }
   try { initCesium(); } catch(e) { console.log('Cesium not ready on load:', e); }
 });
 
@@ -2163,16 +2175,29 @@ let _acResults = [];
 
 function onLocInput(val) {
   clearTimeout(_acTimer);
-  if (!val || val.length < 3) { closeDropdown(); return; }
-  _acTimer = setTimeout(() => fetchSuggestions(val), 380);
+  if (!val || val.length < 2) { closeDropdown(); return; }
+  _acTimer = setTimeout(() => fetchSuggestions(val), 300);
 }
 
 async function fetchSuggestions(q) {
   try {
+    // Ensure keys are loaded before searching
+    if (!MAPBOX_TOKEN && !CESIUM_TOKEN) await loadKeys();
+
     let results = [];
     if (MAPBOX_TOKEN) {
-      // Mapbox Geocoding — street-level address accuracy globally
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=6&types=address,place,postcode,neighborhood,locality`;
+      // Build proximity bias from user's detected location or browser geolocation
+      let proximity = '';
+      if (S.lng && S.lat) {
+        proximity = `&proximity=${S.lng},${S.lat}`;
+      } else if (navigator.geolocation) {
+        // Try to get rough browser location for better results
+        try {
+          const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, {timeout:2000}));
+          proximity = `&proximity=${pos.coords.longitude},${pos.coords.latitude}`;
+        } catch(e) {}
+      }
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=6&types=address,place,postcode,neighborhood,locality,region${proximity}`;
       const r = await fetch(url);
       const d = await r.json();
       results = (d.features || []).map(f => ({
@@ -2188,7 +2213,7 @@ async function fetchSuggestions(q) {
     }
     _acResults = results;
     renderDropdown(results);
-  } catch(e) { closeDropdown(); }
+  } catch(e) { console.log('Autocomplete error:', e); closeDropdown(); }
 }
 
 function renderDropdown(results) {

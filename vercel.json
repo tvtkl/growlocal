@@ -2,14 +2,22 @@
   "version": 2,
   "builds": [
     {
+      "src": "api/keys.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "index.html",
       "use": "@vercel/static"
     }
   ],
   "routes": [
     {
+      "src": "/api/keys",
+      "dest": "/api/keys.js"
+    },
+    {
       "src": "/(.*)",
-      "dest": "/$1"
+      "dest": "/index.html"
     }
   ],
   "headers": [
