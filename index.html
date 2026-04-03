@@ -1387,15 +1387,26 @@ function go(n) {
 // ════════════════════════════════════════════════════════════
 // CESIUM
 // ════════════════════════════════════════════════════════════
-// ── API KEYS ── hardcoded, no user input needed
-const GOOGLE_MAPS_KEY = 'AIzaSyDGzZWW_HgauQ33ipgA3A9hhYZI4ZSJlbI';
-const CESIUM_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJhMzhmODIwMC1hYWJmLTQ5ZTQtYjgwZS03NDI1MGNlMzA4ODYiLCJpZCI6NDEzMDMwLCJpYXQiOjE3NzUxNjQ0MDJ9.LXccZQTSQfEPecEMEdcjTJQqYp8kqkxYaGLPhOyuXOA';
+// ── API KEYS ── loaded securely from /api/keys at runtime
+let GOOGLE_MAPS_KEY = '';
+let CESIUM_TOKEN = '';
+
+async function loadKeys() {
+  try {
+    const r = await fetch('/api/keys');
+    const d = await r.json();
+    GOOGLE_MAPS_KEY = d.googleMapsKey || '';
+    CESIUM_TOKEN = d.cesiumToken || '';
+  } catch(e) {
+    console.log('Could not load API keys — map will use fallback imagery');
+  }
+}
 
 function initCesium() {
   if (S.viewer) return;
   if (typeof Cesium === 'undefined') { console.log('Cesium not loaded yet'); return; }
   try {
-    Cesium.Ion.defaultAccessToken = CESIUM_TOKEN || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc4ZjMiLCJpZCI6MjU5LCJpYXQiOjE1MTgxNzI4MTV9.2D3tmvl-YkFMHgGgnv-WkXPN5JMt4dRNfGk3-MoU7hk';
+    Cesium.Ion.defaultAccessToken = CESIUM_TOKEN;
     S.viewer = new Cesium.Viewer('cesiumContainer', {
       imageryProvider: false, baseLayerPicker: false, geocoder: false,
       homeButton: false, sceneModePicker: false, navigationHelpButton: false,
@@ -1445,7 +1456,8 @@ async function locate() {
   const q = document.getElementById('loc-in').value.trim();
   if (!q) return;
   showL('Finding your location…');
-  // Try to init Cesium — but don't let it block the geocoding
+  // Ensure keys loaded and Cesium initialised
+  if (!CESIUM_TOKEN) await loadKeys();
   try { initCesium(); } catch(e) {}
   try {
     const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`);
@@ -1774,7 +1786,10 @@ function closeModal(){document.getElementById('mbg').classList.remove('open');}
 function showL(m){document.getElementById('loader-msg').textContent=m;document.getElementById('loader').classList.add('on');}
 function hideL(){document.getElementById('loader').classList.remove('on');}
 document.getElementById('loc-in').addEventListener('keydown',e=>{if(e.key==='Enter')locate();});
-window.addEventListener('load',()=>{ try { initCesium(); } catch(e) { console.log('Cesium not ready on load:', e); } });
+window.addEventListener('load', async () => {
+  await loadKeys();
+  try { initCesium(); } catch(e) { console.log('Cesium not ready on load:', e); }
+});
 
 // ══════════════════════════════════════════════════════════════
 // SOLAR INTELLIGENCE ENGINE
