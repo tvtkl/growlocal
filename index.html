@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GrowLocal — Field Intelligence</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@300;400;500&family=Lora:ital,wght@0,600;0,700;1,500&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/cesium@1.105.0/Build/Cesium/Cesium.js"></script>
-<link href="https://unpkg.com/cesium@1.105.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.105.0/Build/Cesium/Cesium.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.105.0/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
 <style>
 /* ═══════════════════════════════════════
@@ -1075,7 +1075,10 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
       </div>
       <div class="form-block">
         <div class="field-label">Address or location</div>
-        <input class="text-input" type="text" id="loc-in" placeholder="Austin TX · San José CR · 51.5°N 0.1°W">
+        <div style="position:relative">
+          <input class="text-input" type="text" id="loc-in" placeholder="Start typing your address…" autocomplete="off" oninput="onLocInput(this.value)">
+          <div id="loc-dropdown" style="display:none;position:absolute;top:calc(100% - 1px);left:0;right:0;background:#fff;border:1.5px solid var(--border-hi);border-top:none;border-radius:0 0 var(--r) var(--r);box-shadow:var(--shadow-md);z-index:100;max-height:240px;overflow-y:auto"></div>
+        </div>
       </div>
       <div class="form-block" style="padding-top:0">
         <button class="btn-primary" onclick="locate()">→ Lock onto Location</button>
@@ -1369,7 +1372,7 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
     <!-- Empty state -->
     <div class="map-empty-state" id="map-empty">
       <div class="map-globe"></div>
-      <p>Search for your address above<br>to see your plot in satellite view</p>
+      <p>Enter your address on the left<br>to see your plot in satellite view</p>
     </div>
 
     <!-- Cesium 3D map -->
@@ -1378,13 +1381,7 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
     <!-- Plot drawing canvas -->
     <canvas id="plot-canvas"></canvas>
 
-    <!-- Map search bar (overlaid on map) -->
-    <div class="map-search-bar">
-      <input class="map-search-input" type="text" id="map-search-in" placeholder="Search your address to fly to your plot…">
-      <button class="map-search-btn" onclick="mapSearch()">🔍 Go</button>
-    </div>
-
-    <!-- Map tool buttons -->
+    <!-- Map tool buttons — only shown once map loads -->
     <div class="map-tools" id="map-tools" style="display:none">
       <button class="map-tool-btn" id="tool-pin" onclick="toggleTool('pin')" title="Drop a pin">📍</button>
       <button class="map-tool-btn" id="tool-draw" onclick="toggleTool('draw')" title="Draw your plot">✏️</button>
@@ -1581,21 +1578,6 @@ function flyHome() {
   if (S.lat && S.lng) flyTo(S.lat, S.lng, 450);
 }
 
-// ── MAP SEARCH (separate from sidebar locate) ──
-async function mapSearch() {
-  const q = document.getElementById('map-search-in').value.trim();
-  if (!q) return;
-  try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`);
-    const d = await r.json();
-    if (!d.length) { alert('Address not found — try a full postcode or street name'); return; }
-    const lat = parseFloat(d[0].lat), lng = parseFloat(d[0].lon);
-    flyTo(lat, lng, 300);
-    // Drop a pin automatically
-    addPin(lat, lng);
-  } catch(e) { alert('Search failed — check your connection'); }
-}
-
 // ── PIN ──
 S.activeTool = null;
 S.pin = null;
@@ -1764,10 +1746,6 @@ function drawInstruction(msg) {
 }
 
 // Also sync map search with sidebar on Enter
-document.addEventListener('DOMContentLoaded', () => {
-  const mapIn = document.getElementById('map-search-in');
-  if (mapIn) mapIn.addEventListener('keydown', e => { if (e.key === 'Enter') mapSearch(); });
-});
 
 // ════════════════════════════════════════════════════════════
 // LOCATION
@@ -2161,11 +2139,95 @@ function closeModal(){document.getElementById('mbg').classList.remove('open');}
 // ════════════════════════════════════════════════════════════
 function showL(m){document.getElementById('loader-msg').textContent=m;document.getElementById('loader').classList.add('on');}
 function hideL(){document.getElementById('loader').classList.remove('on');}
-document.getElementById('loc-in').addEventListener('keydown',e=>{if(e.key==='Enter')locate();});
+
+document.getElementById('loc-in').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { closeDropdown(); locate(); }
+  if (e.key === 'Escape') closeDropdown();
+  if (e.key === 'ArrowDown') { const first = document.querySelector('#loc-dropdown div'); if (first) first.focus(); }
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#loc-in') && !e.target.closest('#loc-dropdown')) closeDropdown();
+});
+
 window.addEventListener('load', async () => {
   await loadKeys();
   try { initCesium(); } catch(e) { console.log('Cesium not ready on load:', e); }
 });
+
+// ── ADDRESS AUTOCOMPLETE ──
+let _acTimer = null;
+let _acResults = [];
+
+function onLocInput(val) {
+  clearTimeout(_acTimer);
+  if (!val || val.length < 3) { closeDropdown(); return; }
+  _acTimer = setTimeout(() => fetchSuggestions(val), 380);
+}
+
+async function fetchSuggestions(q) {
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&addressdetails=1`);
+    const d = await r.json();
+    _acResults = d;
+    renderDropdown(d);
+  } catch(e) { closeDropdown(); }
+}
+
+function renderDropdown(results) {
+  const dd = document.getElementById('loc-dropdown');
+  if (!results || !results.length) { closeDropdown(); return; }
+  dd.innerHTML = results.map((r, i) => {
+    const parts = r.display_name.split(',');
+    const primary = parts.slice(0, 2).join(', ');
+    const secondary = parts.slice(2, 5).join(', ').trim();
+    return `<div
+      role="option"
+      tabindex="0"
+      onclick="pickSuggestion(${i})"
+      onkeydown="if(event.key==='Enter')pickSuggestion(${i})"
+      style="padding:0.65rem 1rem;cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s;outline:none"
+      onmouseover="this.style.background='#F5F2EA'"
+      onmouseout="this.style.background='#fff'"
+      onfocus="this.style.background='#F5F2EA'"
+      onblur="this.style.background='#fff'">
+      <div style="font-size:0.82rem;font-weight:600;color:var(--bark)">${primary}</div>
+      ${secondary ? `<div style="font-size:0.63rem;color:var(--sage);margin-top:0.1rem">${secondary}</div>` : ''}
+    </div>`;
+  }).join('');
+  dd.style.display = 'block';
+}
+
+function pickSuggestion(i) {
+  const r = _acResults[i];
+  if (!r) return;
+  const displayVal = r.display_name.split(',').slice(0, 3).join(', ');
+  document.getElementById('loc-in').value = displayVal;
+  closeDropdown();
+  // Use result directly — no extra fetch needed
+  S.lat = parseFloat(r.lat);
+  S.lng = parseFloat(r.lon);
+  S.location = r.display_name.split(',').slice(0, 3).join(',').trim();
+  const zd = zoneFor(S.lat); S.zone = zd.zone; S.zd = zd;
+  document.getElementById('cc-name').textContent = 'Zone ' + zd.zone + ' — ' + zd.label;
+  document.getElementById('cc-desc').textContent = zd.description;
+  document.getElementById('cc-temp').textContent = zd.avgTemp;
+  document.getElementById('cc-frost').textContent = zd.frostFree;
+  document.getElementById('cc-rain').textContent = zd.rainfall;
+  document.getElementById('ccard').classList.add('show');
+  document.getElementById('btn-next1').disabled = false;
+  try { document.getElementById('h-zone').textContent = zd.zone; } catch(e){}
+  try { document.getElementById('h-season').textContent = curSeason(new Date().getMonth()+1).toUpperCase(); } catch(e){}
+  try { document.getElementById('bt-status').textContent = S.location + ' · Zone ' + zd.zone; } catch(e){}
+  try { initCesium(); } catch(e) {}
+  flyTo(S.lat, S.lng, 450);
+  if (window.SunCalc) runSolarAnalysis(S.lat, S.lng);
+}
+
+function closeDropdown() {
+  const dd = document.getElementById('loc-dropdown');
+  if (dd) dd.style.display = 'none';
+}
 
 // ══════════════════════════════════════════════════════════════
 // SOLAR INTELLIGENCE ENGINE
