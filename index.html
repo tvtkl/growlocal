@@ -1514,20 +1514,23 @@ function go(n) {
 // ════════════════════════════════════════════════════════════
 // CESIUM
 // ════════════════════════════════════════════════════════════
-// ── API KEYS ── loaded securely from /api/keys at runtime
+// ── API KEYS ──
+// Mapbox public token — safe for client-side (restrict to whatcanwegrow.com in Mapbox dashboard)
 let GOOGLE_MAPS_KEY = '';
 let CESIUM_TOKEN = '';
-let MAPBOX_TOKEN = '';
+let MAPBOX_TOKEN = ''; // Will be loaded from /api/keys
 
 async function loadKeys() {
   try {
     const r = await fetch('/api/keys');
+    if (!r.ok) throw new Error('Keys endpoint returned ' + r.status);
     const d = await r.json();
     GOOGLE_MAPS_KEY = d.googleMapsKey || '';
     CESIUM_TOKEN = d.cesiumToken || '';
     MAPBOX_TOKEN = d.mapboxToken || '';
   } catch(e) {
-    console.log('Could not load API keys — map will use fallback imagery');
+    console.log('Keys endpoint not available:', e.message);
+    // App still works — location search uses Nominatim fallback
   }
 }
 
@@ -1555,7 +1558,7 @@ function initCesium() {
   } catch(e) { console.log('Cesium init error:', e); }
 }
 
-function loadFallback() {
+async function loadFallback() {
   try {
     if (S.viewer) {
       const provider = await Cesium.IonImageryProvider.fromAssetId(3);
@@ -1761,15 +1764,25 @@ async function locate() {
   const q = document.getElementById('loc-in').value.trim();
   if (!q) return;
   showL('Finding your location…');
-  // Ensure keys loaded and Cesium initialised
-  if (!CESIUM_TOKEN) await loadKeys();
-  try { initCesium(); } catch(e) {}
   try {
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`);
-    const d = await r.json();
-    if (!d.length) { hideL(); alert('Location not found — try a city name like "London" or "Austin Texas"'); return; }
-    S.lat = parseFloat(d[0].lat); S.lng = parseFloat(d[0].lon);
-    S.location = d[0].display_name.split(',').slice(0,3).join(',').trim();
+    // Use Mapbox if token available, else Nominatim as fallback
+    let lat, lng, locationName;
+    if (MAPBOX_TOKEN) {
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&limit=1`;
+      const r = await fetch(url);
+      const d = await r.json();
+      if (!d.features || !d.features.length) { hideL(); alert('Address not found — try adding your town or country, e.g. "120 Laplantes Road, Buckhorn, Ontario"'); return; }
+      lng = d.features[0].center[0];
+      lat = d.features[0].center[1];
+      locationName = d.features[0].place_name.split(',').slice(0,3).join(',').trim();
+    } else {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`);
+      const d = await r.json();
+      if (!d.length) { hideL(); alert('Location not found — try a city or town name'); return; }
+      lat = parseFloat(d[0].lat); lng = parseFloat(d[0].lon);
+      locationName = d[0].display_name.split(',').slice(0,3).join(',').trim();
+    }
+    S.lat = lat; S.lng = lng; S.location = locationName;
     const zd = zoneFor(S.lat); S.zone = zd.zone; S.zd = zd;
     document.getElementById('cc-name').textContent = 'Zone ' + zd.zone + ' — ' + zd.label;
     document.getElementById('cc-desc').textContent = zd.description;
@@ -1778,16 +1791,15 @@ async function locate() {
     document.getElementById('cc-rain').textContent = zd.rainfall;
     document.getElementById('ccard').classList.add('show');
     document.getElementById('btn-next1').disabled = false;
-    try { document.getElementById('tb-zone').textContent = '// Zone ' + zd.zone + ' · ' + zd.label; } catch(e){}
     try { document.getElementById('h-zone').textContent = zd.zone; } catch(e){}
     const cs = curSeason(new Date().getMonth() + 1);
     try { document.getElementById('h-season').textContent = cs.toUpperCase(); } catch(e){}
     try { document.getElementById('bt-status').textContent = S.location + ' · Zone ' + zd.zone; } catch(e){}
-    // Fly map — safe, won't crash if Cesium failed
-    try { flyTo(S.lat, S.lng, 700); } catch(e){}
+    try { initCesium(); flyTo(S.lat, S.lng, 400); } catch(e){}
+    if (window.SunCalc) runSolarAnalysis(S.lat, S.lng);
   } catch(e) {
     console.error('Locate error:', e);
-    alert('Could not find location — please check your internet connection and try again.');
+    alert('Could not find location — please check your connection and try again.');
   }
   hideL();
 }
@@ -2158,15 +2170,12 @@ document.addEventListener('click', e => {
 });
 
 window.addEventListener('load', async () => {
-  await loadKeys();
-  // Update placeholder to confirm which geocoder is active
-  const inp = document.getElementById('loc-in');
-  if (inp) {
-    inp.placeholder = MAPBOX_TOKEN
-      ? 'Start typing your street address…'
-      : 'Start typing your town or city…';
-  }
-  try { initCesium(); } catch(e) { console.log('Cesium not ready on load:', e); }
+  // Load keys in background — don't block page functionality
+  loadKeys().then(() => {
+    const inp = document.getElementById('loc-in');
+    if (inp && MAPBOX_TOKEN) inp.placeholder = 'Start typing your street address…';
+    try { initCesium(); } catch(e) {}
+  });
 });
 
 // ── ADDRESS AUTOCOMPLETE ──
@@ -2181,34 +2190,20 @@ function onLocInput(val) {
 
 async function fetchSuggestions(q) {
   try {
-    // Ensure keys are loaded before searching
-    if (!MAPBOX_TOKEN && !CESIUM_TOKEN) await loadKeys();
-
     let results = [];
     if (MAPBOX_TOKEN) {
-      // Build proximity bias from user's detected location or browser geolocation
       let proximity = '';
-      if (S.lng && S.lat) {
-        proximity = `&proximity=${S.lng},${S.lat}`;
-      } else if (navigator.geolocation) {
-        // Try to get rough browser location for better results
-        try {
-          const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, {timeout:2000}));
-          proximity = `&proximity=${pos.coords.longitude},${pos.coords.latitude}`;
-        } catch(e) {}
-      }
+      if (S.lng && S.lat) proximity = `&proximity=${S.lng},${S.lat}`;
       const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${MAPBOX_TOKEN}&autocomplete=true&limit=6&types=address,place,postcode,neighborhood,locality,region${proximity}`;
       const r = await fetch(url);
       const d = await r.json();
       results = (d.features || []).map(f => ({
         display_name: f.place_name,
         lat: f.center[1],
-        lon: f.center[0],
-        _mapbox: true
+        lon: f.center[0]
       }));
     } else {
-      // Fallback to Nominatim if no Mapbox token
-      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&addressdetails=1`);
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6`);
       results = await r.json();
     }
     _acResults = results;
@@ -2457,14 +2452,6 @@ function renderSunArc(arcPoints, sunAltNow, sunAzNow, rise, set) {
   }
 }
 
-// Hook into locate() to trigger solar analysis after location found
-const _origLocate = locate;
-locate = async function() {
-  await _origLocate();
-  if (S.lat && S.lng && window.SunCalc) {
-    runSolarAnalysis(S.lat, S.lng);
-  }
-};
 </script>
 </body>
 </html>
