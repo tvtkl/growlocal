@@ -1383,10 +1383,16 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 
     <!-- Map tool buttons — only shown once map loads -->
     <div class="map-tools" id="map-tools" style="display:none">
+      <button class="map-tool-btn" id="tool-buildings" onclick="toggleTool('buildings')" title="Click a building to select it">🏠</button>
       <button class="map-tool-btn" id="tool-pin" onclick="toggleTool('pin')" title="Drop a pin">📍</button>
-      <button class="map-tool-btn" id="tool-draw" onclick="toggleTool('draw')" title="Draw your plot">✏️</button>
-      <button class="map-tool-btn" id="tool-clear" onclick="clearPlot()" title="Clear drawing">🗑️</button>
+      <button class="map-tool-btn" id="tool-draw" onclick="toggleTool('draw')" title="Draw your plot manually">✏️</button>
+      <button class="map-tool-btn" id="tool-clear" onclick="clearPlot()" title="Clear selection">🗑️</button>
       <button class="map-tool-btn" onclick="flyHome()" title="Fly to your location">🎯</button>
+    </div>
+
+    <!-- Building selection tooltip -->
+    <div id="building-tip" style="display:none;position:absolute;top:1rem;left:50%;transform:translateX(-50%);background:rgba(45,74,42,0.92);color:#fff;border-radius:20px;padding:0.4rem 1.1rem;font-size:0.72rem;z-index:25;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);white-space:nowrap">
+      🏠 Click your building or garden to select it
     </div>
 
     <!-- HUD chips -->
@@ -1582,6 +1588,20 @@ function flyTo(lat, lng, alt) {
     });
   } catch(e){ console.log('flyTo error', e); }
   try { document.getElementById('h-coords').textContent = lat.toFixed(4) + '°, ' + lng.toFixed(4) + '°'; } catch(e){}
+
+  // Auto-fetch building footprints after map flies there
+  setTimeout(async () => {
+    if (S.lat && S.lng) {
+      const polygons = await fetchBuildingFootprints(S.lat, S.lng);
+      if (polygons.length > 0) {
+        renderBuildingFootprints(polygons);
+        enableBuildingClickSelect();
+        // Auto-activate building selection tool
+        document.getElementById('tool-buildings')?.classList.add('active');
+        S.activeTool = 'buildings';
+      }
+    }
+  }, 2800); // Wait for fly animation to complete
 }
 
 function flyHome() {
@@ -1599,27 +1619,39 @@ function toggleTool(tool) {
     S.activeTool = null;
     document.querySelectorAll('.map-tool-btn').forEach(b => b.classList.remove('active'));
     stopDrawing();
-  } else {
-    S.activeTool = tool;
-    document.querySelectorAll('.map-tool-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('tool-' + tool)?.classList.add('active');
-    if (tool === 'draw') startDrawing();
-    else stopDrawing();
-    // Add click handler for pin
-    if (tool === 'pin' && S.viewer) {
-      S._pinHandler = new Cesium.ScreenSpaceEventHandler(S.viewer.scene.canvas);
-      S._pinHandler.setInputAction(e => {
-        const ray = S.viewer.camera.getPickRay(e.position);
-        const pos = S.viewer.scene.globe.pick(ray, S.viewer.scene);
-        if (pos) {
-          const carto = Cesium.Cartographic.fromCartesian(pos);
-          const lat = Cesium.Math.toDegrees(carto.latitude);
-          const lng = Cesium.Math.toDegrees(carto.longitude);
-          addPin(lat, lng);
-          toggleTool('pin'); // deactivate after placing
-        }
-      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    if (tool === 'buildings') {
+      if (S._buildingHandler) { try { S._buildingHandler.destroy(); } catch(e){} S._buildingHandler = null; }
     }
+    return;
+  }
+  S.activeTool = tool;
+  document.querySelectorAll('.map-tool-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tool-' + tool)?.classList.add('active');
+
+  if (tool === 'draw') {
+    startDrawing();
+  } else {
+    stopDrawing();
+  }
+
+  if (tool === 'buildings') {
+    enableBuildingClickSelect();
+    const tip = document.getElementById('building-tip');
+    if (tip) { tip.style.display = 'block'; setTimeout(() => tip.style.display = 'none', 4000); }
+  }
+
+  if (tool === 'pin' && S.viewer) {
+    if (S._pinHandler) { try { S._pinHandler.destroy(); } catch(e){} }
+    S._pinHandler = new Cesium.ScreenSpaceEventHandler(S.viewer.scene.canvas);
+    S._pinHandler.setInputAction(e => {
+      const ray = S.viewer.camera.getPickRay(e.position);
+      const pos = S.viewer.scene.globe.pick(ray, S.viewer.scene);
+      if (pos) {
+        const carto = Cesium.Cartographic.fromCartesian(pos);
+        addPin(Cesium.Math.toDegrees(carto.latitude), Cesium.Math.toDegrees(carto.longitude));
+        toggleTool('pin');
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
   }
 }
 
@@ -1739,6 +1771,198 @@ function clearPlot() {
   drawPoints = []; geoPoints = [];
   if (S.pin) { try { S.viewer.entities.remove(S.pin); S.pin = null; } catch(e){} }
   document.getElementById('plot-badge').classList.remove('show');
+  // Also clear selected building highlight
+  clearBuildingSelection();
+}
+
+// ══════════════════════════════════════════════════════════════
+// BUILDING FOOTPRINTS — OpenStreetMap Overpass API
+// ══════════════════════════════════════════════════════════════
+S.buildingEntities = [];
+S.selectedBuilding = null;
+S._buildingHandler = null;
+
+async function fetchBuildingFootprints(lat, lng) {
+  // Overpass query: get buildings and gardens within ~150m radius
+  const radius = 200;
+  const query = `
+    [out:json][timeout:15];
+    (
+      way["building"](around:${radius},${lat},${lng});
+      way["landuse"="garden"](around:${radius},${lat},${lng});
+      way["leisure"="garden"](around:${radius},${lat},${lng});
+      way["landuse"="allotments"](around:${radius},${lat},${lng});
+    );
+    out body;
+    >;
+    out skel qt;
+  `;
+  try {
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(query)
+    });
+    const d = await r.json();
+    return parseOverpassToPolygons(d);
+  } catch(e) {
+    console.log('Overpass fetch error:', e);
+    return [];
+  }
+}
+
+function parseOverpassToPolygons(data) {
+  // Build node lookup
+  const nodes = {};
+  data.elements.forEach(el => {
+    if (el.type === 'node') nodes[el.id] = [el.lon, el.lat];
+  });
+  // Build polygons from ways
+  const polygons = [];
+  data.elements.forEach(el => {
+    if (el.type === 'way' && el.nodes && el.nodes.length > 2) {
+      const coords = el.nodes.map(nid => nodes[nid]).filter(Boolean);
+      if (coords.length > 2) {
+        const isGarden = el.tags && (el.tags.landuse === 'garden' || el.tags.leisure === 'garden' || el.tags.landuse === 'allotments');
+        polygons.push({
+          coords,
+          tags: el.tags || {},
+          isGarden,
+          id: el.id
+        });
+      }
+    }
+  });
+  return polygons;
+}
+
+function renderBuildingFootprints(polygons) {
+  if (!S.viewer || typeof Cesium === 'undefined') return;
+  // Clear previous
+  clearBuildingEntities();
+
+  polygons.forEach(poly => {
+    try {
+      const positions = poly.coords.map(([lng, lat]) =>
+        Cesium.Cartesian3.fromDegrees(lng, lat)
+      );
+      const color = poly.isGarden
+        ? Cesium.Color.fromCssColorString('#7A9E5A').withAlpha(0.35)
+        : Cesium.Color.fromCssColorString('#3D6238').withAlpha(0.25);
+      const outlineColor = poly.isGarden
+        ? Cesium.Color.fromCssColorString('#5C7A40')
+        : Cesium.Color.fromCssColorString('#2D4A2A');
+
+      const entity = S.viewer.entities.add({
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy(positions),
+          material: color,
+          outline: true,
+          outlineColor: outlineColor,
+          outlineWidth: 2,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          classificationType: Cesium.ClassificationType.TERRAIN
+        },
+        properties: { polyData: poly }
+      });
+      S.buildingEntities.push(entity);
+    } catch(e) {}
+  });
+
+  S.viewer.scene.requestRender();
+  showBuildingTip(polygons.length);
+}
+
+function showBuildingTip(count) {
+  const tip = document.getElementById('building-tip');
+  if (!tip) return;
+  tip.textContent = count > 0
+    ? `🏠 ${count} building${count > 1 ? 's' : ''} found — click yours to select it`
+    : '🔍 No buildings found nearby — use ✏️ to draw your plot manually';
+  tip.style.display = 'block';
+  setTimeout(() => { tip.style.display = 'none'; }, 5000);
+}
+
+function enableBuildingClickSelect() {
+  if (!S.viewer || typeof Cesium === 'undefined') return;
+  if (S._buildingHandler) { try { S._buildingHandler.destroy(); } catch(e){} }
+
+  S._buildingHandler = new Cesium.ScreenSpaceEventHandler(S.viewer.scene.canvas);
+  S._buildingHandler.setInputAction(movement => {
+    const picked = S.viewer.scene.pick(movement.position);
+    if (picked && picked.id && picked.id.properties) {
+      const poly = picked.id.properties.polyData?.getValue();
+      if (poly) selectBuilding(picked.id, poly);
+    }
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+}
+
+function selectBuilding(entity, poly) {
+  // Deselect previous
+  clearBuildingSelection();
+  S.selectedBuilding = entity;
+
+  // Highlight selected
+  try {
+    entity.polygon.material = Cesium.Color.fromCssColorString('#5C9E40').withAlpha(0.55);
+    entity.polygon.outlineColor = Cesium.Color.fromCssColorString('#2D6A1A');
+    entity.polygon.outlineWidth = 3;
+    S.viewer.scene.requestRender();
+  } catch(e) {}
+
+  // Calculate area using shoelace formula
+  const coords = poly.coords;
+  let area = 0;
+  const R = 6371000;
+  for (let i = 0; i < coords.length; i++) {
+    const j = (i + 1) % coords.length;
+    const xi = coords[i][0] * Math.PI / 180 * R * Math.cos(coords[i][1] * Math.PI / 180);
+    const yi = coords[i][1] * Math.PI / 180 * R;
+    const xj = coords[j][0] * Math.PI / 180 * R * Math.cos(coords[j][1] * Math.PI / 180);
+    const yj = coords[j][1] * Math.PI / 180 * R;
+    area += xi * yj - xj * yi;
+  }
+  const sqMeters = Math.abs(area / 2);
+  const sqFeet = Math.round(sqMeters * 10.764);
+
+  // Auto-fill dimensions
+  const side = Math.round(Math.sqrt(sqFeet));
+  document.getElementById('sw').value = side;
+  document.getElementById('sl').value = side;
+  updSV();
+
+  // Update HUD
+  document.getElementById('h-sqft').textContent = sqFeet.toLocaleString() + ' sq ft';
+
+  // Show badge
+  const name = poly.tags?.name || (poly.isGarden ? 'Garden' : 'Building');
+  const badge = document.getElementById('plot-badge');
+  document.getElementById('plot-area-text').textContent =
+    `${name} selected · ${sqFeet.toLocaleString()} sq ft (${Math.round(sqMeters)} m²) · dimensions updated ✓`;
+  badge.classList.add('show');
+  setTimeout(() => badge.classList.remove('show'), 6000);
+
+  // Deactivate building tool
+  toggleTool('buildings');
+}
+
+function clearBuildingSelection() {
+  if (S.selectedBuilding) {
+    try {
+      S.selectedBuilding.polygon.material = Cesium.Color.fromCssColorString('#3D6238').withAlpha(0.25);
+      S.selectedBuilding.polygon.outlineColor = Cesium.Color.fromCssColorString('#2D4A2A');
+      S.selectedBuilding.polygon.outlineWidth = 2;
+    } catch(e) {}
+    S.selectedBuilding = null;
+    if (S.viewer) S.viewer.scene.requestRender();
+  }
+}
+
+function clearBuildingEntities() {
+  if (!S.viewer) return;
+  S.buildingEntities.forEach(e => { try { S.viewer.entities.remove(e); } catch(err){} });
+  S.buildingEntities = [];
+  clearBuildingSelection();
+  if (S._buildingHandler) { try { S._buildingHandler.destroy(); } catch(e){} S._buildingHandler = null; }
 }
 
 function drawInstruction(msg) {
