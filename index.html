@@ -1573,6 +1573,9 @@ function initCesium() {
     } else { loadFallback(); }
     try { S.viewer.scene.skyBox.show = false; S.viewer.scene.sun.show = false; S.viewer.scene.moon.show = false; } catch(e){}
     S.viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#C8D9BE');
+    // Allow HTML overlay buttons to receive clicks — Cesium interactions
+    // still work via ScreenSpaceEventHandler which bypasses pointer-events.
+    S.viewer.canvas.style.pointerEvents = 'none';
   } catch(e) { console.log('Cesium init error:', e); }
 }
 
