@@ -1573,9 +1573,22 @@ function initCesium() {
     } else { loadFallback(); }
     try { S.viewer.scene.skyBox.show = false; S.viewer.scene.sun.show = false; S.viewer.scene.moon.show = false; } catch(e){}
     S.viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#C8D9BE');
-    // Allow HTML overlay buttons to receive clicks — Cesium interactions
-    // still work via ScreenSpaceEventHandler which bypasses pointer-events.
+    // Set canvas to pointer-events:none so HTML overlay buttons receive clicks.
+    // A transparent forwarding layer re-routes mouse/wheel/pointer events back
+    // to the canvas so Cesium camera controls continue to work normally.
     S.viewer.canvas.style.pointerEvents = 'none';
+    const evLayer = document.createElement('div');
+    evLayer.id = 'cesium-ev-layer';
+    evLayer.style.cssText = 'position:absolute;inset:0;z-index:2;background:transparent;';
+    document.getElementById('cesiumContainer').appendChild(evLayer);
+    S._evLayer = evLayer;
+    ['pointerdown','pointermove','pointerup','pointercancel',
+     'mousedown','mousemove','mouseup','dblclick','contextmenu','wheel'].forEach(type => {
+      evLayer.addEventListener(type, e => {
+        if (type === 'wheel' || type === 'contextmenu') e.preventDefault();
+        S.viewer.canvas.dispatchEvent(new e.constructor(type, e));
+      }, {passive: false});
+    });
   } catch(e) { console.log('Cesium init error:', e); }
 }
 
@@ -1657,7 +1670,7 @@ function toggleTool(tool) {
 
   if (tool === 'pin' && S.viewer) {
     if (S._pinHandler) { try { S._pinHandler.destroy(); } catch(e){} }
-    S._pinHandler = new Cesium.ScreenSpaceEventHandler(S.viewer.scene.canvas);
+    S._pinHandler = new Cesium.ScreenSpaceEventHandler(S._evLayer || S.viewer.scene.canvas);
     S._pinHandler.setInputAction(e => {
       const ray = S.viewer.camera.getPickRay(e.position);
       const pos = S.viewer.scene.globe.pick(ray, S.viewer.scene);
@@ -1702,7 +1715,7 @@ function startDrawing() {
   canvas.classList.add('drawing');
   drawInstruction('Click to draw your plot boundary — double-click to finish');
 
-  S._drawHandler = new Cesium.ScreenSpaceEventHandler(S.viewer.scene.canvas);
+  S._drawHandler = new Cesium.ScreenSpaceEventHandler(S._evLayer || S.viewer.scene.canvas);
   S._drawHandler.setInputAction(e => {
     const ray = S.viewer.camera.getPickRay(e.position);
     const pos = S.viewer.scene.globe.pick(ray, S.viewer.scene);
@@ -1911,7 +1924,7 @@ function enableBuildingClickSelect() {
   if (!S.viewer || typeof Cesium === 'undefined') return;
   if (S._buildingHandler) { try { S._buildingHandler.destroy(); } catch(e){} }
 
-  S._buildingHandler = new Cesium.ScreenSpaceEventHandler(S.viewer.scene.canvas);
+  S._buildingHandler = new Cesium.ScreenSpaceEventHandler(S._evLayer || S.viewer.scene.canvas);
   S._buildingHandler.setInputAction(movement => {
     const picked = S.viewer.scene.pick(movement.position);
     if (picked && picked.id && picked.id.properties) {
