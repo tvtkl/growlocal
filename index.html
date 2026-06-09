@@ -1612,7 +1612,10 @@ function initCesium() {
 async function loadFallback() {
   try {
     if (S.viewer) {
-      const provider = await Cesium.IonImageryProvider.fromAssetId(3);
+      const provider = new Cesium.UrlTemplateImageryProvider({
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        credit: 'Tiles © Esri'
+      });
       S.viewer.imageryLayers.addImageryProvider(provider);
     }
   } catch(e){}
